@@ -8,7 +8,7 @@
 
 ################SETUP##############
 
-use_bpm 120
+use_bpm 160
 pattern_length = 8.0
 
 loops = [
@@ -23,13 +23,13 @@ loops = [
 effects = [
   
   { effect: :reverb, level_control: :mix, opts: [[:room, 0.8]] },
-  { effect: :distortion, level_control: :distort, opts: [[:mix, 0.5],] },
-  { effect: :bitcrusher, level_control: :mix, opts: []},
-  { effect: :echo, level_control: :mix, opts: []},
-  { effect: :panslicer, level_control: :mix, opts: []},
-  { effect: :compressor, level_control: :mix, opts: []},
-  { effect: :pitch_shift, level_control: :mix, opts: []},
-  { effect: :flanger, level_control: :mix, opts: []},
+  ##| { effect: :distortion, level_control: :distort, opts: [[:mix, 0.5],] },
+  ##| { effect: :krush, level_control: :mix, opts: []},
+  ##| { effect: :echo, level_control: :mix, opts: []},
+  ##| { effect: :slicer, level_control: :mix, opts: []},
+  ##| { effect: :compressor, level_control: :mix, opts: []},
+  { effect: :pitch_shift, level_control: :pitch, opts: [[pitch_dis: 0.0001], [time_dis: 0.0001]]},
+  ##| { effect: :flanger, level_control: :mix, opts: []},
   { effect: :rate}, #separate effect, because not tecnically an effect
 ]
 
@@ -79,8 +79,10 @@ end
 # Pulse for syncing
 live_loop :pulse do
   puts "PULSE"
+  midi_clock_beat port: "s-1_2"
   sleep 1
 end
+
 
 # Step Counter
 in_thread(name: :step_monitor) do
