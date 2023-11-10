@@ -10,17 +10,11 @@ use_bpm 120
 # TODO: May need to get last midi values and input so when I click run again state is correct.
 # TODO: Clear lights at initial run, grab last state of things.
 # Chat GPT suggested
-##| if get(:initial_run) == nil
-##|   set :initial_run, true
-
-##|   # Code to be executed only on the initial run
-##|   puts "This code runs only on the first run"
-##| end
-
-##| # Rest of your code which will run every time
-##| puts "This code runs every time"
 
 ################SETUP##############
+# MIDI Controller Details
+
+pattern_length = 8.0
 
 loops = [
   { sample: :loop_amen, beats: 4 },
@@ -42,18 +36,6 @@ effects = [
   { effect: :flanger, level_control: :mix, opts: []}
 ]
 
-# TODO no need to set this, can make variable like the above
-# 8 Part Sequence on Midimix
-set :pattern_length, 8.0
-
-# Initial state of leds
-set :sequence_trigger_leds, [0,0,0,0,0,0,0,0]
-set :note_off_leds, [0,0,0,0,0,0,0,0]
-
-
-# TODO: Note lookup for sequence trigger notes and note offs as well like the below
-set :midi_sequence_trigger_notes, [1,4,7,10,13,16,19,22,27]
-set :midi_note_off_notes, [3,6,9,12,15,18,21,24]
 midi_sample_notes = [16,20,24,28,46,50,54,58]
 midi_sequence_slice_notes = [17,21,25,29,47,51,55,59]
 midi_fx_notes = [18,22,26,30,48,52,56,60]
@@ -67,26 +49,46 @@ midi_fx_notes.each_with_index {|note, idx| midi_note_lookup[note] = {midi_store:
 midi_fx_level_notes.each_with_index {|note, idx| midi_note_lookup[note] = {midi_store: :midi_fx_level, index: idx}}
 
 
-# Initial values for midi
-# TODO: Can I have these remain in subsequent runs if I only set on initial run?
-set :midi_triggers, ring(0,0,0,0,0,0,0,0)
-set :midi_note_offs, ring(0,0,0,0,0,0,0,0)
-set :midi_samples, ring(0,0,0,0,0,0,0,0)
-set :midi_sequence_slices, ring(0,0,0,0,0,0,0,0)
-set :midi_fx, ring(0,0,0,0,0,0,0,0)
-set :midi_fx_level, ring(0,0,0,0,0,0,0,0)
 
-
-# Need to define this here apparently since called in next method
-define :send_led_status do |note, status|
-  velocity = status == 'off' ? 0 : 127
-  midi_note_on note, velocity: velocity, port: 'midi_mix_1', channel: 1
+puts "Before Initial run #{get(:initial_run)}"
+if get(:initial_run) == nil
+  puts "Inital Run: #{get(:initial_run)}"
+  set :initial_run, true
+  
+  # Initial state of leds
+  set :sequence_trigger_leds, [0,0,0,0,0,0,0,0]
+  set :note_off_leds, [0,0,0,0,0,0,0,0]
+  # TODO: Note lookup for sequence trigger notes and note offs as well like the below
+  set :midi_sequence_trigger_notes, [1,4,7,10,13,16,19,22,27]
+  set :midi_note_off_notes, [3,6,9,12,15,18,21,24]
+  
+  
+  
+  # Initial values for midi
+  # TODO: Can I have these remain in subsequent runs if I only set on initial run?
+  set :midi_triggers, ring(0,0,0,0,0,0,0,0)
+  set :midi_note_offs, ring(0,0,0,0,0,0,0,0)
+  set :midi_samples, ring(0,0,0,0,0,0,0,0)
+  set :midi_sequence_slices, ring(0,0,0,0,0,0,0,0)
+  set :midi_fx, ring(0,0,0,0,0,0,0,0)
+  set :midi_fx_level, ring(0,0,0,0,0,0,0,0)
+  
+  define :send_led_status do |note, status|
+    velocity = status == 'off' ? 0 : 127
+    midi_note_on note, velocity: velocity, port: 'midi_mix_1', channel: 1
+  end
+  
+  # Turn Off all LEDs
+  (get(:midi_sequence_trigger_notes) + get(:midi_note_off_notes)).each do |note|
+    send_led_status(note, 'off')
+  end
+  
+  puts "INITIAL RUN!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
 end
 
-# Turn Off all LEDs
-(get(:midi_sequence_trigger_notes) + get(:midi_note_off_notes)).each do |note|
-  send_led_status(note, 'off')
-end
+
+
+
 
 # Pulse for syncing
 live_loop :pulse do
@@ -99,7 +101,7 @@ in_thread(name: :step_monitor) do
   loop do
     sync :pulse
     puts get[:step]
-    set :step, (get[:step]+1) % get(:pattern_length)
+    set :step, (get[:step]+1) % pattern_length
   end
 end
 
