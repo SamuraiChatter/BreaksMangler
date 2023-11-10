@@ -1,19 +1,14 @@
 ############BREAK MANGLER############
-use_bpm 120
+## !!!! Click Send All on MidixMix after starting to have CC values from midi controller align to state in program !!! ##
 
 # TODO: Explore Send All button and if I can update state that way!!!!!!!!!!!!!!!!
-
 # TODO: create an amen sample named amen tight that I extract audio/add audio to make everything tight to the grid and see the difference.
-# TODO: More efficient to access variable then get lookup, so I should refactor to make that better. especially around midi events if possible.
 # TODO: Flash Led off and on as part of sequence clock going through sequencer
 # TODO: If I had an arduino midi controller I could limit how many events send, not full 127 for a sweep probably
-# TODO: May need to get last midi values and input so when I click run again state is correct.
-# TODO: Clear lights at initial run, grab last state of things.
-# Chat GPT suggested
 
 ################SETUP##############
-# MIDI Controller Details
 
+use_bpm 120
 pattern_length = 8.0
 
 loops = [
@@ -26,6 +21,7 @@ loops = [
 # TODO: Incorporate options
 # Support two optons currently #TODO: Would like to change to hash if possible for readability, relying on dig for arrays though in play sample
 effects = [
+  
   { effect: :reverb, level_control: :mix, opts: [[:room, 0.8]] },
   { effect: :distortion, level_control: :distort, opts: [[:mix, 0.5],] },
   { effect: :bitcrusher, level_control: :mix, opts: []},
@@ -33,7 +29,8 @@ effects = [
   { effect: :panslicer, level_control: :mix, opts: []},
   { effect: :compressor, level_control: :mix, opts: []},
   { effect: :pitch_shift, level_control: :mix, opts: []},
-  { effect: :flanger, level_control: :mix, opts: []}
+  { effect: :flanger, level_control: :mix, opts: []},
+  { effect: :rate}, #separate effect, because not tecnically an effect
 ]
 
 midi_sample_notes = [16,20,24,28,46,50,54,58]
@@ -48,24 +45,18 @@ midi_sequence_slice_notes.each_with_index {|note, idx| midi_note_lookup[note] = 
 midi_fx_notes.each_with_index {|note, idx| midi_note_lookup[note] = {midi_store: :midi_fx, index: idx}}
 midi_fx_level_notes.each_with_index {|note, idx| midi_note_lookup[note] = {midi_store: :midi_fx_level, index: idx}}
 
-
-
 puts "Before Initial run #{get(:initial_run)}"
 if get(:initial_run) == nil
   puts "Inital Run: #{get(:initial_run)}"
   set :initial_run, true
   
-  # Initial state of leds
+  # Setup Buttons
   set :sequence_trigger_leds, [0,0,0,0,0,0,0,0]
   set :note_off_leds, [0,0,0,0,0,0,0,0]
-  # TODO: Note lookup for sequence trigger notes and note offs as well like the below
   set :midi_sequence_trigger_notes, [1,4,7,10,13,16,19,22,27]
   set :midi_note_off_notes, [3,6,9,12,15,18,21,24]
   
   
-  
-  # Initial values for midi
-  # TODO: Can I have these remain in subsequent runs if I only set on initial run?
   set :midi_triggers, ring(0,0,0,0,0,0,0,0)
   set :midi_note_offs, ring(0,0,0,0,0,0,0,0)
   set :midi_samples, ring(0,0,0,0,0,0,0,0)
@@ -82,12 +73,7 @@ if get(:initial_run) == nil
   (get(:midi_sequence_trigger_notes) + get(:midi_note_off_notes)).each do |note|
     send_led_status(note, 'off')
   end
-  
-  puts "INITIAL RUN!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!"
 end
-
-
-
 
 
 # Pulse for syncing
@@ -96,6 +82,7 @@ live_loop :pulse do
   sleep 1
 end
 
+# Step Counter
 in_thread(name: :step_monitor) do
   set :step, 0
   loop do
@@ -105,6 +92,7 @@ in_thread(name: :step_monitor) do
   end
 end
 
+# Show Step on Midi Controller
 live_loop :sequence_led_clock do
   sync :pulse
   step = get(:step)
@@ -115,7 +103,7 @@ live_loop :sequence_led_clock do
 end
 
 
-# MIDI Button Events
+# Monitor MIDI Button Events
 live_loop :midi_mix_note_events do
   use_real_time
   sequence_note, sequence_velocity = sync "/midi:midi_mix_0:1/note_on"
@@ -130,19 +118,22 @@ live_loop :midi_mix_note_events do
   end
 end
 
-# MIDI Knob Events
-# Seperated these from note events because the sequencer relies on understanding history, where as, I want these to be more performative
+# Monitor MIDI Knob Events
 live_loop :midi_mix_control_changes do
   use_real_time
   control_note, control_velocity = sync "/midi:midi_mix_0:1/control_change"
   lookup = midi_note_lookup[control_note]
-  index = lookup[:index]
-  midi_store = lookup[:midi_store]
-  update_midi_store(midi_store, control_velocity, index)
+  if lookup # This may need to stay since I won't be using all the various banks on midi controller
+    index = lookup[:index]
+    midi_store = lookup[:midi_store]
+    update_midi_store(midi_store, control_velocity, index)
+  end
+  
   #sleep 0.01 # This may miss events, but also performs better under a full sweep. Chat GPT suggested sleeping 0.01
 end
 
 ######## Loop Music #############
+
 live_loop :f do
   sync :pulse
   sample :bd_tek
@@ -208,18 +199,35 @@ define :play_sample do |loop, slice, step|
   hash = effects[midi_value_to_range(get(:midi_fx)[step], effects.size - 1)]
   puts "hash: #{hash}"
   fx = hash[:effect]
-  level_attribute = hash[:level_control]
   level = get(:midi_fx_level)[step] / 128.0 #128 instead of 127 beacause a lot of values need to be less than 1.0
-  opts = hash[:opts]
-  puts #{opts}
-  puts "loop #{loop}, sample #{loop[:sample]}, beats #{loop[:beats]}"
-  with_fx fx, level_attribute, level, opts.dig(0,0), opts.dig(0,1), opts.dig(1,0), opts.dig(1,1) do
-    sample loop[:sample],
-      beat_stretch: loop[:beats],
-      num_slices: loop[:beats],
-      slice: slice
+  if fx == :rate
+    if (0.0..0.1).include?(level)
+      sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats], slice: slice
+    elsif (0.1..0.3).include?(level)
+      sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats], slice: slice, rate: -1
+    elsif (0.3..0.5).include?(level)
+      sample loop[:sample], beat_strecth: loop[:beats], num_slices: loop[:beats] * 1.5, slice: slice, rate: 0.5
+    elsif (0.5..0.7).include?(level)
+      sample loop[:sample], beat_strecth: loop[:beats], num_slices: loop[:beats] * 1.25, slice: slice, rate: 0.75
+    elsif (0.7..0.9).include?(level)
+      sample loop[:sample], beat_strecth: loop[:beats], num_slices: loop[:beats] / 1.5, slice: slice, rate: 1.25
+    else
+      sample loop[:sample], beat_strecth: loop[:beats], num_slices: loop[:beats] / 2, slice: slice, rate: 1.5
+    end
+  else
+    level_attribute = hash[:level_control]
+    opts = hash[:opts]
+    puts #{opts}
+    puts "loop #{loop}, sample #{loop[:sample]}, beats #{loop[:beats]}"
+    with_fx fx, level_attribute, level, opts.dig(0,0), opts.dig(0,1), opts.dig(1,0), opts.dig(1,1) do
+      sample loop[:sample],
+        beat_stretch: loop[:beats],
+        num_slices: loop[:beats],
+        slice: slice
+    end
   end
 end
+
 
 
 ############# MIDI METHODS ############
@@ -261,12 +269,3 @@ define :update_midi_store do |midi_store, value, index|
   values[index] = value
   set midi_store, values.ring
 end
-
-# THINGS TO TALK ABOUT FOR LUNCH AND LEARN
-# MIDI EVENTS, circuit breaking with faraday, not sure if comparison there but feels like it, microservices, we need to think about it more, triage ticket I had for this that I messaged Chrispy about
-# Refactoring
-# When to abstract, determining when too much
-# Change of concepts note_ons vs note_offs from user experience level, working with red, so it seemed like a bad user experience
-# Sequence of events and utilizing start point on further steps. Hard to wrap head around but creates problems
-# Concept of rings is really interesting
-# model samples makes sense they used limitless encoders since I ran into issues with current state of knobs and you have to have sysex to rectify.
