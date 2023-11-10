@@ -1,20 +1,14 @@
 ############BREAK MANGLER############
 use_bpm 120
 
-# TODO: Is there a way to get initial knob midi values from midi controller on start? # SOUNDS LIKE NOT POSSIBLE UNLESS SOMETHING HAPPEND SINCE 2021
-# TODO: Midi Knob events seem like they are sometimes not getting processed. Go real quick across a line and they don't end up recording all of them. # Maybe they need to be separate threads.
+# TODO: Explore Send All button and if I can update state that way!!!!!!!!!!!!!!!!
+
 # TODO: create an amen sample named amen tight that I extract audio/add audio to make everything tight to the grid and see the difference.
 # TODO: More efficient to access variable then get lookup, so I should refactor to make that better. especially around midi events if possible.
 # TODO: Flash Led off and on as part of sequence clock going through sequencer
-################SETUP##############
-
-# TODO: Add loop amen but with 8 beats, make sure it works and more interesting chop points
+# TODO: If I had an arduino midi controller I could limit how many events send, not full 127 for a sweep probably
 # TODO: May need to get last midi values and input so when I click run again state is correct.
-
-# TODO: Figure out why it takes so long to update midi values, maybe a way to see if still turning knob
-# TODO: In loops, define number of slices
 # TODO: Clear lights at initial run, grab last state of things.
-# Refactor to grab last values instead of constantly updating state for midi events
 # Chat GPT suggested
 ##| if get(:initial_run) == nil
 ##|   set :initial_run, true
@@ -26,17 +20,26 @@ use_bpm 120
 ##| # Rest of your code which will run every time
 ##| puts "This code runs every time"
 
+################SETUP##############
 
 loops = [
   { sample: :loop_amen, beats: 4 },
-  { sample: :loop_amen_full, beats: 1 },
-  { sample: :loop_breakbeat, beats: 4 }
+  { sample: :loop_amen_full, beats: 16 },
+  { sample: :loop_breakbeat, beats: 4 },
+  { sample: :loop_industrial, beats: 2}
 ]
 
 # TODO: Incorporate options
+# Support two optons currently #TODO: Would like to change to hash if possible for readability, relying on dig for arrays though in play sample
 effects = [
-  { effect: :reverb, level_control: :mix, opts: { room: 0.8, } },
-  { effect: :distortion, level_control: :distort, opts: {} }
+  { effect: :reverb, level_control: :mix, opts: [[:room, 0.8]] },
+  { effect: :distortion, level_control: :distort, opts: [[:mix, 0.5],] },
+  { effect: :bitcrusher, level_control: :mix, opts: []},
+  { effect: :echo, level_control: :mix, opts: []},
+  { effect: :panslicer, level_control: :mix, opts: []},
+  { effect: :compressor, level_control: :mix, opts: []},
+  { effect: :pitch_shift, level_control: :mix, opts: []},
+  { effect: :flanger, level_control: :mix, opts: []}
 ]
 
 # TODO no need to set this, can make variable like the above
@@ -48,23 +51,24 @@ set :sequence_trigger_leds, [0,0,0,0,0,0,0,0]
 set :note_off_leds, [0,0,0,0,0,0,0,0]
 
 
-# PROBABLY NEED TO COMPLILE THESE INTO A DICTIONARY TO REMOVE IF ELSE STATEMENTS AND VARIOUS LOOKUPS
-# SINCE THEESE HAPPEN SO FREQUENTLY. AND UPDATE.
-# ONE IDEA IS TO ALSO STORE CREATE DICTIONARY IN STEP OF A LOT OF THINGS GOING ON TO REDUCE NUMBER OF LOOKUPS
-
-# Notes Values we receive from Midimix
-
-
-# TODO: Convert these to variables since they don't change? I think that will be more performant.
+# TODO: Note lookup for sequence trigger notes and note offs as well like the below
 set :midi_sequence_trigger_notes, [1,4,7,10,13,16,19,22,27]
 set :midi_note_off_notes, [3,6,9,12,15,18,21,24]
-set :midi_sample_notes, [16,20,24,28,46,50,54,58]
-set :midi_sequence_slice_notes, [17,21,25,29,47,51,55,59]
-set :midi_fx_notes, [18,22,26,30,48,52,56,22]
-set :midi_fx_level_notes, [19,23,27,31,49,53,57,61]
+midi_sample_notes = [16,20,24,28,46,50,54,58]
+midi_sequence_slice_notes = [17,21,25,29,47,51,55,59]
+midi_fx_notes = [18,22,26,30,48,52,56,60]
+midi_fx_level_notes = [19,23,27,31,49,53,57,61]
+
+midi_note_lookup = {}
+
+midi_sample_notes.each_with_index {|note, idx| midi_note_lookup[note] = {midi_store: :midi_samples, index: idx}}
+midi_sequence_slice_notes.each_with_index {|note, idx| midi_note_lookup[note] = {midi_store: :midi_sequence_slices, index: idx}}
+midi_fx_notes.each_with_index {|note, idx| midi_note_lookup[note] = {midi_store: :midi_fx, index: idx}}
+midi_fx_level_notes.each_with_index {|note, idx| midi_note_lookup[note] = {midi_store: :midi_fx_level, index: idx}}
+
 
 # Initial values for midi
-# TODO: Can I remove these entirely and grab last state of midi value or default to 0 if nothing.
+# TODO: Can I have these remain in subsequent runs if I only set on initial run?
 set :midi_triggers, ring(0,0,0,0,0,0,0,0)
 set :midi_note_offs, ring(0,0,0,0,0,0,0,0)
 set :midi_samples, ring(0,0,0,0,0,0,0,0)
@@ -90,7 +94,6 @@ live_loop :pulse do
   sleep 1
 end
 
-# Allows other processes to understand what step we are on in sequence
 in_thread(name: :step_monitor) do
   set :step, 0
   loop do
@@ -100,7 +103,6 @@ in_thread(name: :step_monitor) do
   end
 end
 
-# Shows what point you are at on the midi controller
 live_loop :sequence_led_clock do
   sync :pulse
   step = get(:step)
@@ -126,41 +128,16 @@ live_loop :midi_mix_note_events do
   end
 end
 
-
-# TODO: See if I can abstract this away by just grabbing the last value. What sucks about that is I
-# may not be able to prevent tweaking having affects of trigger affecting others. Although these.
 # MIDI Knob Events
-# Seperated these from note events because the sequencer relies on understanding history
-# Where as I want these to be more performative
+# Seperated these from note events because the sequencer relies on understanding history, where as, I want these to be more performative
 live_loop :midi_mix_control_changes do
   use_real_time
   control_note, control_velocity = sync "/midi:midi_mix_0:1/control_change"
-  if get(:midi_sequence_slice_notes).index(control_note)
-    update_midi(control_note, control_velocity, :midi_sequence_slice_notes, :midi_sequence_slices)
-    puts "!!!!!!!!!!!!! Sequence_slices: #{get(:midi_sequence_slices)}"
-  elsif get(:midi_sample_notes).index(control_note)
-    update_midi(control_note, control_velocity, :midi_sample_notes, :midi_samples)
-  elsif get(:midi_fx_notes).index(control_note)
-    update_midi(control_note, control_velocity, :midi_fx_notes, :midi_fx)
-  elsif get(:midi_fx_level_notes).index(control_note)
-    update_midi(control_note, control_velocity, :midi_fx_level_notes, :midi_fx_level)
-  else
-    puts "Unaccounted for Control Note for :midi_mix_control_changes"
-  end
-end
-
-# Move this down in script when finished
-# Need to interpret these values in the playing of samples
-
-#I think I am going to need a midi store that then updates values behind it in what the sequencer is refrencing,
-#otherwise if value is updated no longer going to play the correct next step if a trigger
-# Good test for this would be have only first triger and all note ons and start fucking with the sample start control on that first trigger
-# Additional thinking not enough to work backwards in array, need to consider it with rings and last trigger event.
-define :update_midi do |control_note, control_velocity, control_notes, control_type|
-  index = get(control_notes).index(control_note)
-  values = get(control_type).to_a
-  values[index] = control_velocity
-  set control_type, values.ring
+  lookup = midi_note_lookup[control_note]
+  index = lookup[:index]
+  midi_store = lookup[:midi_store]
+  update_midi_store(midi_store, control_velocity, index)
+  #sleep 0.01 # This may miss events, but also performs better under a full sweep. Chat GPT suggested sleeping 0.01
 end
 
 ######## Loop Music #############
@@ -210,7 +187,7 @@ def midi_value_to_range(midi_value, range_limit)
   # TODO: There is a problem here. Not even distribution, rounding with floor maybe?
   
   # Changing to round.floor seems to fix things when I use effects, but I have a bug in loop amen 16 bit
-  (midi_value.to_f / 127 * range_limit).floor
+  (midi_value.to_f / 127 * range_limit).round.floor
 end
 
 define :determine_behavior do |step, midi_triggers|
@@ -231,8 +208,10 @@ define :play_sample do |loop, slice, step|
   fx = hash[:effect]
   level_attribute = hash[:level_control]
   level = get(:midi_fx_level)[step] / 128.0 #128 instead of 127 beacause a lot of values need to be less than 1.0
-  
-  with_fx fx, level_attribute, level do
+  opts = hash[:opts]
+  puts #{opts}
+  puts "loop #{loop}, sample #{loop[:sample]}, beats #{loop[:beats]}"
+  with_fx fx, level_attribute, level, opts.dig(0,0), opts.dig(0,1), opts.dig(1,0), opts.dig(1,1) do
     sample loop[:sample],
       beat_stretch: loop[:beats],
       num_slices: loop[:beats],
@@ -258,9 +237,6 @@ define :handle_led_status do |note, notes, leds|
   end
 end
 
-
-
-
 define :update_sequence do |note, notes, sequence_type|
   index = get(notes).index(note)
   sequence = get(sequence_type).to_a
@@ -277,7 +253,12 @@ define :update_sequence do |note, notes, sequence_type|
   end
 end
 
-#TODO: Should I be working forward with slicing rather than backwards?
+define :update_midi_store do |midi_store, value, index|
+  specific_midi_store = get(midi_store)
+  values = specific_midi_store.to_a
+  values[index] = value
+  set midi_store, values.ring
+end
 
 # THINGS TO TALK ABOUT FOR LUNCH AND LEARN
 # MIDI EVENTS, circuit breaking with faraday, not sure if comparison there but feels like it, microservices, we need to think about it more, triage ticket I had for this that I messaged Chrispy about
