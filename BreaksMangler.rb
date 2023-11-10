@@ -8,52 +8,42 @@ use_bpm 120
 # TODO: Flash Led off and on as part of sequence clock going through sequencer
 ################SETUP##############
 
-# Define what samples to utilize, input beats and it creates sensible slices
-# TODO: May be able to extract start_points away since I have moved to slices and just have number of slices rather than array of start points
-# TODO: this structure leaves something lacking, maybe use string for key, or try and abstract that away entirely
 # TODO: Add loop amen but with 8 beats, make sure it works and more interesting chop points
-
 # TODO: May need to get last midi values and input so when I click run again state is correct.
+
 # TODO: Figure out why it takes so long to update midi values, maybe a way to see if still turning knob
+# TODO: In loops, define number of slices
+# TODO: Clear lights at initial run, grab last state of things.
+# Refactor to grab last values instead of constantly updating state for midi events
+# Chat GPT suggested
+##| if get(:initial_run) == nil
+##|   set :initial_run, true
+
+##|   # Code to be executed only on the initial run
+##|   puts "This code runs only on the first run"
+##| end
+
+##| # Rest of your code which will run every time
+##| puts "This code runs every time"
 
 
-# TODO: !!!!!!!!!!!!!!!!!!!!!!! CONVERT TO ARRAY, integrate sample select, Rename Loops NOT samples
 loops = [
-  {
-    sample: :loop_amen, # sample that is called
-    beats: 4 #Used for time synce
-    # slices: 4 maybe abstract away start points, but maybe allow me to declare number of slices for specific sample
-  },
-  {
-    sample: :loop_amen_full,
-    beats: 16
-  },
-  {
-    sample: :loop_breakbeat,
-    beats: 4
-  }
+  { sample: :loop_amen, beats: 4 },
+  { sample: :loop_amen_full, beats: 1 },
+  { sample: :loop_breakbeat, beats: 4 }
 ]
 
+# TODO: Incorporate options
 effects = [
-  {
-    effect: :reverb,
-    level_control: :mix,
-    opts: {
-      room: 0.8,
-    }
-  },
-  {
-    effect: :distortion,
-    level_control: :distort,
-    opts: {}
-  }
+  { effect: :reverb, level_control: :mix, opts: { room: 0.8, } },
+  { effect: :distortion, level_control: :distort, opts: {} }
 ]
 
+# TODO no need to set this, can make variable like the above
 # 8 Part Sequence on Midimix
 set :pattern_length, 8.0
 
 # Initial state of leds
-# TODO: Send signal at beginning of script to turn everything off since they don't turn off at end of run
 set :sequence_trigger_leds, [0,0,0,0,0,0,0,0]
 set :note_off_leds, [0,0,0,0,0,0,0,0]
 
@@ -74,6 +64,7 @@ set :midi_fx_notes, [18,22,26,30,48,52,56,22]
 set :midi_fx_level_notes, [19,23,27,31,49,53,57,61]
 
 # Initial values for midi
+# TODO: Can I remove these entirely and grab last state of midi value or default to 0 if nothing.
 set :midi_triggers, ring(0,0,0,0,0,0,0,0)
 set :midi_note_offs, ring(0,0,0,0,0,0,0,0)
 set :midi_samples, ring(0,0,0,0,0,0,0,0)
@@ -135,6 +126,9 @@ live_loop :midi_mix_note_events do
   end
 end
 
+
+# TODO: See if I can abstract this away by just grabbing the last value. What sucks about that is I
+# may not be able to prevent tweaking having affects of trigger affecting others. Although these.
 # MIDI Knob Events
 # Seperated these from note events because the sequencer relies on understanding history
 # Where as I want these to be more performative
@@ -178,15 +172,10 @@ end
 live_loop :e do
   sync :pulse
   step = get(:step)
-  puts "Live loop step #{step}"
   midi_triggers = get(:midi_triggers)
   trigger = midi_triggers[step]
   midi_note_offs = get(:midi_note_offs)
   note_off = midi_note_offs[step]
-  start_points =
-    puts "note_offs: #{midi_note_offs}"
-    puts "Live loop trigger #{trigger}"
-  puts "TRIGGERS: #{get(:midi_triggers)}"
   
   if note_off == 0 && midi_triggers.to_a.include?(1)
     play_slice(step, midi_triggers)
@@ -219,6 +208,8 @@ def midi_value_to_range(midi_value, range_limit)
   # This method allows us to send a midi value 0-127 and break it into even parts based on the range limit
   puts "midi: #{midi_value.to_f}, #{range_limit}, @#{ (midi_value.to_f / 127 * range_limit).floor}"
   # TODO: There is a problem here. Not even distribution, rounding with floor maybe?
+  
+  # Changing to round.floor seems to fix things when I use effects, but I have a bug in loop amen 16 bit
   (midi_value.to_f / 127 * range_limit).floor
 end
 
@@ -286,7 +277,7 @@ define :update_sequence do |note, notes, sequence_type|
   end
 end
 
-
+#TODO: Should I be working forward with slicing rather than backwards?
 
 # THINGS TO TALK ABOUT FOR LUNCH AND LEARN
 # MIDI EVENTS, circuit breaking with faraday, not sure if comparison there but feels like it, microservices, we need to think about it more, triage ticket I had for this that I messaged Chrispy about
@@ -295,3 +286,4 @@ end
 # Change of concepts note_ons vs note_offs from user experience level, working with red, so it seemed like a bad user experience
 # Sequence of events and utilizing start point on further steps. Hard to wrap head around but creates problems
 # Concept of rings is really interesting
+# model samples makes sense they used limitless encoders since I ran into issues with current state of knobs and you have to have sysex to rectify.
