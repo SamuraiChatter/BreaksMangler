@@ -9,48 +9,41 @@
 ################SETUP##############
 
 use_bpm 160
-pattern_length = 8.0
 
-loops = [
-  { sample: :loop_amen, beats: 4 },
-  { sample: :loop_amen_full, beats: 16 },
-  { sample: :loop_breakbeat, beats: 4 },
-  { sample: :loop_industrial, beats: 2}
-]
-
-# TODO: Incorporate options
-# Support two optons currently #TODO: Would like to change to hash if possible for readability, relying on dig for arrays though in play sample
-effects = [
-  
-  { effect: :reverb, level_control: :mix, opts: [[:room, 0.8]] },
-  ##| { effect: :distortion, level_control: :distort, opts: [[:mix, 0.5],] },
-  ##| { effect: :krush, level_control: :mix, opts: []},
-  ##| { effect: :echo, level_control: :mix, opts: []},
-  ##| { effect: :slicer, level_control: :mix, opts: []},
-  ##| { effect: :compressor, level_control: :mix, opts: []},
-  { effect: :pitch_shift, level_control: :pitch, opts: [[pitch_dis: 0.0001], [time_dis: 0.0001]]},
-  ##| { effect: :flanger, level_control: :mix, opts: []},
-  { effect: :rate}, #separate effect, because not tecnically an effect
-]
+########## Akai Midimix Details ##########
+pattern_length = 8.0 # 8 Steps on Akai Midimix Contoller
 
 midi_sample_notes = [16,20,24,28,46,50,54,58]
 midi_sequence_slice_notes = [17,21,25,29,47,51,55,59]
 midi_fx_notes = [18,22,26,30,48,52,56,60]
 midi_fx_level_notes = [19,23,27,31,49,53,57,61]
-
 midi_note_lookup = {}
-
 midi_sample_notes.each_with_index {|note, idx| midi_note_lookup[note] = {midi_store: :midi_samples, index: idx}}
 midi_sequence_slice_notes.each_with_index {|note, idx| midi_note_lookup[note] = {midi_store: :midi_sequence_slices, index: idx}}
 midi_fx_notes.each_with_index {|note, idx| midi_note_lookup[note] = {midi_store: :midi_fx, index: idx}}
 midi_fx_level_notes.each_with_index {|note, idx| midi_note_lookup[note] = {midi_store: :midi_fx_level, index: idx}}
 
-puts "Before Initial run #{get(:initial_run)}"
+######### Loop and Effect Details #########
+loops = [
+  { sample: :loop_amen, beats: 4 },
+  { sample: :loop_amen_full, beats: 16 },
+  { sample: :loop_breakbeat, beats: 4 },
+  { sample: :loop_industrial, beats: 2 },
+  { sample: :loop_garzul, beats: 16 },
+  
+]
+effects = [
+  { effect: :reverb, level_control: :mix, opts: [[:room, 0.8]] },
+  { effect: :gverb, level_control: :mix, opts: [[:room, 1.2]] },
+  { effect: :pitch_shift, level_control: :pitch, opts: [[pitch_dis: 0.0001], [time_dis: 0.0001]]},
+  { effect: :rate }, #Customized Behavior, does not support same format as preceeding effects
+]
+
+######### Set Variables and reset LEDs on Initial Run ########
 if get(:initial_run) == nil
   puts "Inital Run: #{get(:initial_run)}"
   set :initial_run, true
   
-  # Setup Buttons
   set :sequence_trigger_leds, [0,0,0,0,0,0,0,0]
   set :note_off_leds, [0,0,0,0,0,0,0,0]
   set :midi_sequence_trigger_notes, [1,4,7,10,13,16,19,22,27]
@@ -69,22 +62,18 @@ if get(:initial_run) == nil
     midi_note_on note, velocity: velocity, port: 'midi_mix_1', channel: 1
   end
   
-  # Turn Off all LEDs
   (get(:midi_sequence_trigger_notes) + get(:midi_note_off_notes)).each do |note|
     send_led_status(note, 'off')
   end
 end
 
-
-# Pulse for syncing
+######### Establish Sync Pulse and Step Counter #########
 live_loop :pulse do
   puts "PULSE"
   midi_clock_beat port: "s-1_2"
   sleep 1
 end
 
-
-# Step Counter
 in_thread(name: :step_monitor) do
   set :step, 0
   loop do
@@ -94,8 +83,8 @@ in_thread(name: :step_monitor) do
   end
 end
 
-# Show Step on Midi Controller
-live_loop :sequence_led_clock do
+######## MIDI monitoring #########
+live_loop :sync_midi_controller_lights do
   sync :pulse
   step = get(:step)
   current_midi_note = get(:midi_note_off_notes)[step]
@@ -104,9 +93,7 @@ live_loop :sequence_led_clock do
   send_led_status(current_midi_note, 'on')
 end
 
-
-# Monitor MIDI Button Events
-live_loop :midi_mix_note_events do
+live_loop :update_midi_button_events do
   use_real_time
   sequence_note, sequence_velocity = sync "/midi:midi_mix_0:1/note_on"
   if get(:midi_sequence_trigger_notes).index(sequence_note)
@@ -120,8 +107,7 @@ live_loop :midi_mix_note_events do
   end
 end
 
-# Monitor MIDI Knob Events
-live_loop :midi_mix_control_changes do
+live_loop :update_midi_knob_slider_values do
   use_real_time
   control_note, control_velocity = sync "/midi:midi_mix_0:1/control_change"
   lookup = midi_note_lookup[control_note]
@@ -134,13 +120,7 @@ live_loop :midi_mix_control_changes do
   #sleep 0.01 # This may miss events, but also performs better under a full sweep. Chat GPT suggested sleeping 0.01
 end
 
-######## Loop Music #############
-
-live_loop :f do
-  sync :pulse
-  sample :bd_tek
-end
-
+######### Play Music #########
 live_loop :e do
   sync :pulse
   step = get(:step)
