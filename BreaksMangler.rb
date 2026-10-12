@@ -71,24 +71,17 @@ end
 
 ######### Establish Sync Pulse and Step Counter #########
 live_loop :pulse do
-  puts "PULSE"
+  # The step travels with the cue, so every loop that syncs on it gets the same step
+  step = (tick % pattern_length).to_i
+  puts "PULSE #{step}"
+  cue :step, step: step
   midi_clock_beat port: "s-1_2"
   sleep 1
 end
 
-in_thread(name: :step_monitor) do
-  set :step, 0
-  loop do
-    sync :pulse
-    puts get[:step]
-    set :step, (get[:step]+1) % pattern_length
-  end
-end
-
 ######## MIDI monitoring #########
 live_loop :sync_midi_controller_lights do
-  sync :pulse
-  step = get(:step)
+  step = sync(:step)[:step]
   current_midi_note = get(:midi_note_off_notes)[step]
   previous_midi_note = get(:midi_note_off_notes)[step - 1]
   send_led_status(previous_midi_note, 'off') if get(:midi_note_offs)[step -1] == 0
@@ -124,8 +117,7 @@ end
 
 ######### Play Music #########
 live_loop :e do
-  sync :pulse
-  step = get(:step)
+  step = sync(:step)[:step]
   midi_triggers = get(:midi_triggers)
   trigger = midi_triggers[step]
   midi_note_offs = get(:midi_note_offs)
