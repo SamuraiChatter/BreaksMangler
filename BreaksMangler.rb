@@ -24,15 +24,66 @@ midi_sequence_slice_notes.each_with_index {|note, idx| midi_note_lookup[note] = 
 midi_fx_notes.each_with_index {|note, idx| midi_note_lookup[note] = {midi_store: :midi_fx, index: idx}}
 midi_fx_level_notes.each_with_index {|note, idx| midi_note_lookup[note] = {midi_store: :midi_fx_level, index: idx}}
 
-######### Loop and Effect Details #########
-loops = [
+######### Sample Library (dynamic folder scan) #########
+# Folder/filename conventions are documented in README.md. Full rationale
+# in DEVELOPER_README.md.
+
+define :resolve_samples_root do
+  config_path = File.join(Dir.home, ".breaksmangler_samples_root")
+  default_root = File.join(Dir.home, "Applications", "SonicPi", "Samples")
+  File.write(config_path, default_root) unless File.exist?(config_path)
+  File.read(config_path).strip
+end
+
+define :build_loops do |samples_root, demo_loops|
+  folder_pattern = /\A(\d+)_(beat|bar)\z/
+  prefix_pattern = /\A(\d+)_/
+  accepted_extensions = ["wav", "wave", "aiff", "aif", "flac"]
+
+  entries = []
+  Dir.glob(File.join(samples_root, "*")).each do |folder_path|
+    next unless File.directory?(folder_path)
+    match = folder_pattern.match(File.basename(folder_path))
+    next unless match
+    beats = match[2] == "bar" ? match[1].to_i * 4 : match[1].to_i
+
+    Dir.glob(File.join(folder_path, "*")).each do |file_path|
+      next unless File.file?(file_path)
+      next unless accepted_extensions.include?(File.extname(file_path).delete(".").downcase)
+
+      prefix_match = prefix_pattern.match(File.basename(file_path))
+      if prefix_match
+        entries << { sample: file_path, beats: beats, prefix: prefix_match[1].to_i, path: file_path }
+      else
+        puts "BreaksMangler: #{File.basename(file_path)} has no numeric prefix (e.g. 01_) - sorting it last"
+        entries << { sample: file_path, beats: beats, prefix: nil, path: file_path }
+      end
+    end
+  end
+
+  prefixed, unprefixed = entries.partition { |entry| entry[:prefix] }
+  ordered = prefixed.sort_by { |entry| [entry[:prefix], entry[:beats], entry[:path]] } +
+            unprefixed.sort_by { |entry| [entry[:beats], entry[:path]] }
+
+  if ordered.empty?
+    puts "BreaksMangler: No custom samples found at #{samples_root} - playing Sonic Pi's built-in demo loops instead. Add your own there (see README.md) to replace them."
+    demo_loops
+  else
+    ordered.map { |entry| { sample: entry[:sample], beats: entry[:beats] } }
+  end
+end
+
+demo_loops = [
   { sample: :loop_amen, beats: 4 },
   { sample: :loop_amen_full, beats: 16 },
   { sample: :loop_breakbeat, beats: 4 },
   { sample: :loop_industrial, beats: 2 },
   { sample: :loop_garzul, beats: 16 },
-  
 ]
+
+loops = build_loops(resolve_samples_root, demo_loops)
+
+######### Loop and Effect Details #########
 effects = [
   { effect: :reverb, level_control: :mix, opts: [[:room, 0.8]] },
   { effect: :gverb, level_control: :mix, opts: [[:room, 1.2]] },
@@ -142,7 +193,6 @@ end
 define :play_slice do |step, midi_triggers|
   trigger_index, previous_steps = determine_behavior(step, midi_triggers)
   loop = loops[midi_value_to_range(get(:midi_samples)[trigger_index], loops.size - 1)]
-  puts "loop: #{loop}"
   slice_index = sample_slice(loop, trigger_index, previous_steps)
   
   play_sample(loop, slice_index, step)
@@ -160,7 +210,6 @@ end
 
 def midi_value_to_range(midi_value, range_limit)
   # This method allows us to send a midi value 0-127 and break it into even parts based on the range limit
-  puts "midi: #{midi_value.to_f}, #{range_limit}, @#{ (midi_value.to_f / 127 * range_limit).floor}"
   # TODO: There is a problem here. Not even distribution, rounding with floor maybe?
   
   # Changing to round.floor seems to fix things when I use effects, but I have a bug in loop amen 16 bit
@@ -179,9 +228,7 @@ define :determine_behavior do |step, midi_triggers|
 end
 
 define :play_sample do |loop, slice, step|
-  puts "RESULT!!!!!!!: #{midi_value_to_range(get(:midi_fx)[step], get(:midi_fx).size - 1)}"
   hash = effects[midi_value_to_range(get(:midi_fx)[step], effects.size - 1)]
-  puts "hash: #{hash}"
   fx = hash[:effect]
   level = get(:midi_fx_level)[step] / 128.0 #128 instead of 127 beacause a lot of values need to be less than 1.0
   if fx == :rate
@@ -190,19 +237,17 @@ define :play_sample do |loop, slice, step|
     elsif (0.1..0.3).include?(level)
       sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats], slice: slice, rate: -1
     elsif (0.3..0.5).include?(level)
-      sample loop[:sample], beat_strecth: loop[:beats], num_slices: loop[:beats] * 1.5, slice: slice, rate: 0.5
+      sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats] * 1.5, slice: slice, rate: 0.5
     elsif (0.5..0.7).include?(level)
-      sample loop[:sample], beat_strecth: loop[:beats], num_slices: loop[:beats] * 1.25, slice: slice, rate: 0.75
+      sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats] * 1.25, slice: slice, rate: 0.75
     elsif (0.7..0.9).include?(level)
-      sample loop[:sample], beat_strecth: loop[:beats], num_slices: loop[:beats] / 1.5, slice: slice, rate: 1.25
+      sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats] / 1.5, slice: slice, rate: 1.25
     else
-      sample loop[:sample], beat_strecth: loop[:beats], num_slices: loop[:beats] / 2, slice: slice, rate: 1.5
+      sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats] / 2, slice: slice, rate: 1.5
     end
   else
     level_attribute = hash[:level_control]
     opts = hash[:opts]
-    puts #{opts}
-    puts "loop #{loop}, sample #{loop[:sample]}, beats #{loop[:beats]}"
     with_fx fx, level_attribute, level, opts.dig(0,0), opts.dig(0,1), opts.dig(1,0), opts.dig(1,1) do
       sample loop[:sample],
         beat_stretch: loop[:beats],
@@ -249,6 +294,7 @@ end
 
 define :update_midi_store do |midi_store, value, index|
   specific_midi_store = get(midi_store)
+  return if specific_midi_store[index] == value
   values = specific_midi_store.to_a
   values[index] = value
   set midi_store, values.ring
