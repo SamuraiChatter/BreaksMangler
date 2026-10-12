@@ -9,6 +9,7 @@
 ################SETUP##############
 
 use_bpm 160
+use_sched_ahead_time 0.2
 
 ########## Akai Midimix Details ##########
 pattern_length = 8.0 # 8 Steps on Akai Midimix Contoller
@@ -39,6 +40,12 @@ effects = [
   { effect: :rate }, #Customized Behavior, does not support same format as preceeding effects
 ]
 
+# Defined on every run, so a change here takes effect without restarting Sonic Pi
+define :send_led_status do |note, status|
+  velocity = status == 'off' ? 0 : 127
+  midi_note_on note, velocity: velocity, port: 'midi_mix', channel: 1
+end
+
 ######### Set Variables and reset LEDs on Initial Run ########
 if get(:initial_run) == nil
   puts "Inital Run: #{get(:initial_run)}"
@@ -56,11 +63,6 @@ if get(:initial_run) == nil
   set :midi_sequence_slices, ring(0,0,0,0,0,0,0,0)
   set :midi_fx, ring(0,0,0,0,0,0,0,0)
   set :midi_fx_level, ring(0,0,0,0,0,0,0,0)
-  
-  define :send_led_status do |note, status|
-    velocity = status == 'off' ? 0 : 127
-    midi_note_on note, velocity: velocity, port: 'midi_mix_1', channel: 1
-  end
   
   (get(:midi_sequence_trigger_notes) + get(:midi_note_off_notes)).each do |note|
     send_led_status(note, 'off')
@@ -95,7 +97,7 @@ end
 
 live_loop :update_midi_button_events do
   use_real_time
-  sequence_note, sequence_velocity = sync "/midi:midi_mix_0:1/note_on"
+  sequence_note, sequence_velocity = sync "/midi:midi_mix:1/note_on"
   if get(:midi_sequence_trigger_notes).index(sequence_note)
     update_sequence(sequence_note, :midi_sequence_trigger_notes, :midi_triggers)
     handle_led_status(sequence_note, :midi_sequence_trigger_notes, :sequence_trigger_leds)
@@ -109,7 +111,7 @@ end
 
 live_loop :update_midi_knob_slider_values do
   use_real_time
-  control_note, control_velocity = sync "/midi:midi_mix_0:1/control_change"
+  control_note, control_velocity = sync "/midi:midi_mix:1/control_change"
   lookup = midi_note_lookup[control_note]
   if lookup # This may need to stay since I won't be using all the various banks on midi controller
     index = lookup[:index]
