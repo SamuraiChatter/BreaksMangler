@@ -7,10 +7,11 @@
 # Sonic Pi's `live_loop`/`in_thread` blocks are stubbed to accept and
 # discard their block entirely, so nothing inside them ever runs here -
 # that's what keeps this a fast, side-effect-free process instead of an
-# actual live-coding session. `Dir.home` is redirected to a throwaway temp
-# directory before loading, since BreaksMangler.rb calls
-# `load_settings`/`build_loops` eagerly at the top level and would
-# otherwise touch the real developer machine's home directory.
+# actual live-coding session. BreaksMangler.rb calls
+# `load_settings`/`build_loops` eagerly at the top level, so before loading,
+# `Dir.home` is redirected to a throwaway temp directory and the script is
+# copied to another: its settings file is created beside it, and the scan
+# would otherwise read the real developer machine's settings and samples.
 #
 # Run with: ruby spec/breaks_mangler_spec.rb
 
@@ -62,7 +63,17 @@ end
 fake_home = Dir.mktmpdir("breaksmangler_spec_home")
 Dir.define_singleton_method(:home) { fake_home }
 
-load File.expand_path("../BreaksMangler.rb", __dir__)
+script_dir = Dir.mktmpdir("breaksmangler_spec_script")
+FileUtils.cp(File.expand_path("../BreaksMangler.rb", __dir__), script_dir)
+load File.join(script_dir, "BreaksMangler.rb")
+
+assert_equal(
+  true,
+  File.exist?(File.join(script_dir, "breaksmangler.yml")),
+  "running the script creates its settings file beside it",
+  failures
+)
+assert_equal([], Dir.children(fake_home), "running the script creates nothing in the home folder", failures)
 
 ##### build_loops #####
 
@@ -119,7 +130,7 @@ end
 
 Dir.mktmpdir("breaksmangler_spec_settings") do |settings_home|
   Dir.define_singleton_method(:home) { settings_home }
-  settings_path = File.join(settings_home, ".breaksmangler.yml")
+  settings_path = File.join(settings_home, "breaksmangler.yml")
   legacy_path = File.join(settings_home, ".breaksmangler_samples_root")
   defaults = {
     "samples_folder" => File.join(settings_home, "Applications", "SonicPi", "Samples"),
@@ -131,14 +142,18 @@ Dir.mktmpdir("breaksmangler_spec_settings") do |settings_home|
 
   File.write(legacy_path, "/old/path/file")
   settings = nil
-  output = capture_output { settings = load_settings }
+  output = capture_output { settings = load_settings(settings_path) }
   assert_equal(defaults, settings, "load_settings returns every default when there is no settings file, ignoring the old path file", failures)
   assert_equal(defaults, YAML.safe_load(File.read(settings_path)), "load_settings creates the settings file holding every default", failures)
   assert_equal("", output, "load_settings says nothing when it creates the file", failures)
 
   File.delete(legacy_path)
-  load_settings
+  load_settings(settings_path)
   assert_equal(false, File.exist?(legacy_path), "load_settings never creates the old path file", failures)
+
+  output = capture_output { settings = load_settings(nil) }
+  assert_equal(defaults, settings, "load_settings returns every default when the script has no path", failures)
+  assert_equal(true, output.include?("not started with run_file"), "load_settings says when the script has no path", failures)
 
   custom = {
     "samples_folder" => "/somewhere/else",
@@ -148,17 +163,17 @@ Dir.mktmpdir("breaksmangler_spec_settings") do |settings_home|
     "tempo" => 87.5,
   }
   File.write(settings_path, custom.to_yaml)
-  output = capture_output { settings = load_settings }
+  output = capture_output { settings = load_settings(settings_path) }
   assert_equal(custom, settings, "load_settings reads each setting from the file", failures)
   assert_equal("", output, "load_settings says nothing when every setting is good", failures)
 
   File.write(settings_path, "tempo: 120\n")
-  output = capture_output { settings = load_settings }
+  output = capture_output { settings = load_settings(settings_path) }
   assert_equal(defaults.merge("tempo" => 120), settings, "load_settings uses the default for a missing setting", failures)
   assert_equal(true, output.include?("clock_mode is missing"), "load_settings names a missing setting", failures)
 
   File.write(settings_path, custom.merge("clock_mode" => "sideways", "tempo" => "fast", "midi_mix_input_port" => 5).to_yaml)
-  output = capture_output { settings = load_settings }
+  output = capture_output { settings = load_settings(settings_path) }
   assert_equal(
     custom.merge("clock_mode" => "internal", "tempo" => 160, "midi_mix_input_port" => "midi_mix"),
     settings,
@@ -173,18 +188,18 @@ Dir.mktmpdir("breaksmangler_spec_settings") do |settings_home|
   )
 
   File.write(settings_path, custom.merge("tempoo" => 90).reject { |name, _| name == "tempo" }.to_yaml)
-  output = capture_output { settings = load_settings }
+  output = capture_output { settings = load_settings(settings_path) }
   assert_equal(160, settings["tempo"], "load_settings uses the default when a setting's name is misspelt", failures)
   assert_equal(true, output.include?("tempoo in #{settings_path} is not a setting"), "load_settings names a misspelt setting", failures)
 
   File.write(settings_path, "tempo: [1\n")
-  output = capture_output { settings = load_settings }
+  output = capture_output { settings = load_settings(settings_path) }
   assert_equal(defaults, settings, "load_settings uses every default when the file is not valid YAML", failures)
   assert_equal(true, output.include?("could not be read"), "load_settings says when the file could not be read", failures)
 
   File.delete(settings_path)
   FileUtils.mkdir_p(settings_path) # a settings path that can't be read as a file
-  output = capture_output { settings = load_settings }
+  output = capture_output { settings = load_settings(settings_path) }
   assert_equal(defaults, settings, "load_settings uses every default when the file can't be opened", failures)
   assert_equal(true, output.include?("could not be read"), "load_settings says when the file can't be opened", failures)
 end

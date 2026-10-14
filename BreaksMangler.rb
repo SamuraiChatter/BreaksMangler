@@ -8,12 +8,11 @@
 
 ################SETUP##############
 
-######### Settings (read from ~/.breaksmangler.yml on every run) #########
+######### Settings (read from breaksmangler.yml beside this file on every run) #########
 # Every setting and its default is listed in README.md.
 require "yaml"
 
-define :load_settings do
-  path = File.join(Dir.home, ".breaksmangler.yml")
+define :load_settings do |path|
   defaults = {
     "samples_folder" => File.join(Dir.home, "Applications", "SonicPi", "Samples"),
     "midi_mix_input_port" => "midi_mix",
@@ -29,6 +28,11 @@ define :load_settings do
     "clock_mode" => ->(value) { ["internal", "external"].include?(value) },
     "tempo" => ->(value) { value.is_a?(Numeric) && value > 0 },
   }
+
+  if path.nil?
+    puts "BreaksMangler: not started with run_file, so the settings file cannot be found - using every default"
+    return defaults
+  end
 
   loaded = begin
     File.write(path, defaults.to_yaml) unless File.exist?(path)
@@ -56,7 +60,10 @@ define :load_settings do
   end
 end
 
-settings = load_settings
+# run_file gives the script its own path, which is how the settings file
+# beside it is found. Code pasted into a buffer has no path.
+settings_path = File.file?(__FILE__) ? File.join(File.dirname(File.expand_path(__FILE__)), "breaksmangler.yml") : nil
+settings = load_settings(settings_path)
 
 # clock_mode is read but not acted on yet: the tempo always comes from here
 use_bpm settings["tempo"]

@@ -19,14 +19,17 @@ BREAK-2, user-facing version in `README.md`).
   long loops by default, which suits a "mangler" more than strict
   short-then-long grouping. Users who want strict grouping just use
   non-overlapping number ranges per folder.
-- **Samples root, port names and tempo via one self-creating settings file
-  at `~/.breaksmangler.yml`** (BREAK-6), not `RUBY_PLATFORM` branching or
-  `__FILE__`/`__dir__` introspection. Sonic Pi doesn't reliably preserve a
-  buffer's on-disk path through its run mechanism, so path introspection is
-  unsafe to rely on. `Dir.home` is reliable on both Windows and Linux.
-  Default samples folder (used to seed the file, and used directly if the
-  setting is missing): `~/Applications/SonicPi/Samples` — matches the Pi's
-  existing layout, mirrored under `$HOME` on any OS. The file replaced
+- **Samples root, port names and tempo via one self-creating settings
+  file, `breaksmangler.yml`, beside the script** (BREAK-6), not
+  `RUBY_PLATFORM` branching. Sonic Pi v5's `run_file` evaluates the file
+  under its own path, so `__FILE__` finds the folder; a pasted buffer has no
+  path and plays with every default. The file is ignored by git rather than
+  tracked: a tracked file would show as modified once edited, could carry a
+  personal path or port name into a commit, and would conflict on pull when
+  a setting is added. Default samples folder (used to seed the file, and
+  used directly if the setting is missing):
+  `~/Applications/SonicPi/Samples` — matches the Pi's existing layout,
+  mirrored under `$HOME` on any OS. The file replaced
   `~/.breaksmangler_samples_root`, which is no longer read or created.
 - **YAML, read with `YAML.safe_load`.** Sonic Pi v5's bundled Ruby (4.0)
   loads `yaml` on Windows. A setting that is missing, misspelt or holds a
@@ -60,7 +63,8 @@ for the small set of Sonic Pi-only calls that execute *eagerly* at the top
 level of `BreaksMangler.rb` (`use_bpm`, `use_sched_ahead_time`, `define`, `get`/`set`, `ring`,
 `midi_note_on`), then `load`s the real file — `live_loop`/`in_thread` blocks
 are stubbed to discard their block entirely, so nothing inside them ever
-runs. `Dir.home` is redirected to a throwaway temp directory first, since
+runs. `Dir.home` is redirected to a throwaway temp directory first, and the
+script is loaded from a copy in another, since
 `load_settings`/`build_loops` run for real during that eager load.
 Once loaded, the spec calls the pure-logic functions (`build_loops`,
 `load_settings`, `midi_value_to_range`, `determine_behavior`,
@@ -93,7 +97,7 @@ BreaksMangler/
 
 Drop a couple of test `.wav` files into 2-3 of these folders (leaving the
 rest empty is fine and expected — see decisions above). Point your local
-settings at this tree by setting `samples_folder` in `~/.breaksmangler.yml`
+settings at this tree by setting `samples_folder` in `breaksmangler.yml`
 to the full path of this `Samples` folder, since it won't match the
 `~/Applications/SonicPi/Samples` default unless you happen to be testing
 from that exact location.
@@ -116,7 +120,7 @@ runtime, specifically:
   unrestricted inside a Sonic Pi buffer on the target Sonic Pi
   version/platform (expected to work, since Sonic Pi doesn't sandbox
   standard Ruby file I/O, but this hasn't been run inside Sonic Pi itself).
-- Whether `~/.breaksmangler.yml` actually gets created on first run, in the
+- Whether `breaksmangler.yml` actually gets created on first run, in the
   expected location, on the Pi (BREAK-11).
 - Whether `sample` correctly loads a full filesystem path string for each
   of the accepted formats (`.wav`, `.wave`, `.aiff`, `.aif`, `.flac`) the

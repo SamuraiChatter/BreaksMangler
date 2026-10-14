@@ -85,9 +85,10 @@ this. If you'd rather keep your samples somewhere else, change
 
 ## Settings
 
-BreaksMangler reads its settings from `.breaksmangler.yml` in your home
-folder every time it runs. The first run creates the file with every setting
-at its default, so you only edit what you want to change:
+BreaksMangler reads its settings from `breaksmangler.yml`, in the same
+folder as `BreaksMangler.rb`, every time it runs. The first run creates the
+file with every setting at its default, so you only edit what you want to
+change:
 
 ```yaml
 samples_folder: C:/Users/you/Applications/SonicPi/Samples
@@ -112,3 +113,8 @@ Prefs → IO.
 If a setting is missing, misspelt or has a value BreaksMangler does not
 recognise, it plays with that setting's default and the log names the
 setting. Stop and run the script again after changing the file.
+
+The file is yours: git ignores it, so your settings are never committed and
+updating BreaksMangler never overwrites them. It is only found when the
+script is started with `run_file`. Code pasted into a buffer plays with
+every default and the log says so.
