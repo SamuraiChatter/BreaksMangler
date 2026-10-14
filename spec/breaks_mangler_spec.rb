@@ -83,6 +83,8 @@ Dir.mktmpdir("breaksmangler_spec_samples") do |root|
   File.write(File.join(root, "1_beat", "no_prefix.wav"), "") # sorts after all valid-prefix files
   File.write(File.join(root, "4_bar", "01_long.flac"), "")
   File.write(File.join(root, "not_a_match", "01_nope.wav"), "") # folder doesn't match N_beat/N_bar
+  FileUtils.mkdir_p(File.join(root, "0_beat"))
+  File.write(File.join(root, "0_beat", "01_zero.wav"), "") # zero beats can't be sliced, so it's skipped
 
   result = build_loops(root, demo_loops)
   names = result.map { |entry| File.basename(entry[:sample]) }
@@ -95,6 +97,12 @@ Dir.mktmpdir("breaksmangler_spec_samples") do |root|
     failures
   )
   assert_equal([1, 16, 1, 1, 1], beats, "build_loops tags each entry with its folder's beat count", failures)
+
+  bracket_root = File.join(root, "my [new] samples")
+  FileUtils.mkdir_p(File.join(bracket_root, "1_beat"))
+  File.write(File.join(bracket_root, "1_beat", "01_found.wav"), "")
+  names = build_loops(bracket_root, demo_loops).map { |entry| File.basename(entry[:sample]) }
+  assert_equal(["01_found.wav"], names, "build_loops finds samples under a path holding glob characters", failures)
 end
 
 Dir.mktmpdir("breaksmangler_spec_config") do |config_home|
@@ -117,6 +125,14 @@ Dir.mktmpdir("breaksmangler_spec_config") do |config_home|
     "resolve_samples_root reads and trims an existing config file instead of overwriting it",
     failures
   )
+
+  default_root = File.join(config_home, "Applications", "SonicPi", "Samples")
+  File.write(config_path, "  \n")
+  assert_equal(default_root, resolve_samples_root, "resolve_samples_root uses the default when the config file is empty", failures)
+
+  File.delete(config_path)
+  FileUtils.mkdir_p(config_path) # a config path that can't be read as a file
+  assert_equal(default_root, resolve_samples_root, "resolve_samples_root uses the default when the config file can't be read", failures)
 end
 
 ##### midi_value_to_range #####

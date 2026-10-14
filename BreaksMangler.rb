@@ -31,8 +31,14 @@ midi_fx_level_notes.each_with_index {|note, idx| midi_note_lookup[note] = {midi_
 define :resolve_samples_root do
   config_path = File.join(Dir.home, ".breaksmangler_samples_root")
   default_root = File.join(Dir.home, "Applications", "SonicPi", "Samples")
-  File.write(config_path, default_root) unless File.exist?(config_path)
-  File.read(config_path).strip
+  begin
+    File.write(config_path, default_root) unless File.exist?(config_path)
+    root = File.read(config_path).strip
+    root.empty? ? default_root : root
+  rescue SystemCallError => error
+    puts "BreaksMangler: could not use #{config_path} (#{error.message}) - looking for samples in #{default_root}"
+    default_root
+  end
 end
 
 define :build_loops do |samples_root, demo_loops|
@@ -41,13 +47,17 @@ define :build_loops do |samples_root, demo_loops|
   accepted_extensions = ["wav", "wave", "aiff", "aif", "flac"]
 
   entries = []
-  Dir.glob(File.join(samples_root, "*")).each do |folder_path|
+  # base: keeps glob characters in the samples path from being read as a pattern
+  Dir.glob("*", base: samples_root).each do |folder_name|
+    folder_path = File.join(samples_root, folder_name)
     next unless File.directory?(folder_path)
-    match = folder_pattern.match(File.basename(folder_path))
+    match = folder_pattern.match(folder_name)
     next unless match
     beats = match[2] == "bar" ? match[1].to_i * 4 : match[1].to_i
+    next if beats < 1 # a zero-beat loop cannot be sliced
 
-    Dir.glob(File.join(folder_path, "*")).each do |file_path|
+    Dir.glob("*", base: folder_path).each do |file_name|
+      file_path = File.join(folder_path, file_name)
       next unless File.file?(file_path)
       next unless accepted_extensions.include?(File.extname(file_path).delete(".").downcase)
 
