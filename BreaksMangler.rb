@@ -91,6 +91,12 @@ effects = [
   { effect: :rate }, #Customized Behavior, does not support same format as preceeding effects
 ]
 
+# Defined on every run, so a change here takes effect without restarting Sonic Pi
+define :send_led_status do |note, status|
+  velocity = status == 'off' ? 0 : 127
+  midi_note_on note, velocity: velocity, port: 'midi_mix', channel: 1
+end
+
 ######### Set Variables and reset LEDs on Initial Run ########
 if get(:initial_run) == nil
   puts "Inital Run: #{get(:initial_run)}"
@@ -109,11 +115,6 @@ if get(:initial_run) == nil
   set :midi_fx, ring(0,0,0,0,0,0,0,0)
   set :midi_fx_level, ring(0,0,0,0,0,0,0,0)
   
-  define :send_led_status do |note, status| ############################ CAN I REFACTOR THI
-    velocity = status == 'off' ? 0 : 127
-    midi_note_on note, velocity: velocity, port: "midi_mix", channel: 1
-  end
-  
   (get(:midi_sequence_trigger_notes) + get(:midi_note_off_notes)).each do |note|
     send_led_status(note, 'off')
   end
@@ -121,24 +122,17 @@ end
 
 ######### Establish Sync Pulse and Step Counter #########
 live_loop :pulse do
-  puts "PULSE"
+  # The step travels with the cue, so every loop that syncs on it gets the same step
+  step = (tick % pattern_length).to_i
+  puts "PULSE #{step}"
+  cue :step, step: step
   midi_clock_beat port: "s-1_2"
   sleep 1
 end
 
-in_thread(name: :step_monitor) do
-  set :step, 0
-  loop do
-    sync :pulse
-    puts get[:step]
-    set :step, (get[:step]+1) % pattern_length
-  end
-end
-
 ######## MIDI monitoring #########
 live_loop :sync_midi_controller_lights do
-  sync :pulse
-  step = get(:step)
+  step = sync(:step)[:step]
   current_midi_note = get(:midi_note_off_notes)[step]
   previous_midi_note = get(:midi_note_off_notes)[step - 1]
   send_led_status(previous_midi_note, 'off') if get(:midi_note_offs)[step -1] == 0
@@ -175,8 +169,7 @@ end
 
 ######### Play Music #########
 live_loop :e do
-  sync :pulse
-  step = get(:step)
+  step = sync(:step)[:step]
   midi_triggers = get(:midi_triggers)
   trigger = midi_triggers[step]
   midi_note_offs = get(:midi_note_offs)
