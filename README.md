@@ -53,7 +53,8 @@ Time State is shared by every buffer and survives Stop. If the script behaves od
 ## Adding your own samples
 
 You don't need to edit any code to add sounds — just drop audio files (`.wav`,
-`.aiff`, or `.flac`) into a `Samples` folder, following two simple rules:
+`.wave`, `.aiff`, `.aif` or `.flac`) into a `Samples` folder, following two
+simple rules:
 
 1. Put each file in a folder named after its length, like `1_bar` (a 1-bar
    loop) or `4_bar` (a 4-bar loop). It's fine for some of these folders to
