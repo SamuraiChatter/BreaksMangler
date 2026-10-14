@@ -9,13 +9,14 @@
 # that's what keeps this a fast, side-effect-free process instead of an
 # actual live-coding session. `Dir.home` is redirected to a throwaway temp
 # directory before loading, since BreaksMangler.rb calls
-# `resolve_samples_root`/`build_loops` eagerly at the top level and would
+# `load_settings`/`build_loops` eagerly at the top level and would
 # otherwise touch the real developer machine's home directory.
 #
 # Run with: ruby spec/breaks_mangler_spec.rb
 
 require "tmpdir"
 require "fileutils"
+require "stringio"
 
 failures = []
 
@@ -63,7 +64,7 @@ Dir.define_singleton_method(:home) { fake_home }
 
 load File.expand_path("../BreaksMangler.rb", __dir__)
 
-##### build_loops / resolve_samples_root #####
+##### build_loops #####
 
 Dir.mktmpdir("breaksmangler_spec_samples") do |root|
   demo_loops = [{ sample: :loop_amen, beats: 4 }, { sample: :loop_amen_full, beats: 16 }]
@@ -97,26 +98,81 @@ Dir.mktmpdir("breaksmangler_spec_samples") do |root|
   assert_equal([1, 16, 1, 1, 1], beats, "build_loops tags each entry with its folder's beat count", failures)
 end
 
-Dir.mktmpdir("breaksmangler_spec_config") do |config_home|
-  Dir.define_singleton_method(:home) { config_home }
-  config_path = File.join(config_home, ".breaksmangler_samples_root")
+##### load_settings #####
 
-  root = resolve_samples_root
+def capture_output
+  original = $stdout
+  $stdout = StringIO.new
+  yield
+  $stdout.string
+ensure
+  $stdout = original
+end
+
+Dir.mktmpdir("breaksmangler_spec_settings") do |settings_home|
+  Dir.define_singleton_method(:home) { settings_home }
+  settings_path = File.join(settings_home, ".breaksmangler.yml")
+  legacy_path = File.join(settings_home, ".breaksmangler_samples_root")
+  defaults = {
+    "samples_folder" => File.join(settings_home, "Applications", "SonicPi", "Samples"),
+    "midi_mix_input_port" => "midi_mix",
+    "midi_mix_output_port" => "midi_mix",
+    "clock_mode" => "internal",
+    "tempo" => 160,
+  }
+
+  File.write(legacy_path, "/old/path/file")
+  settings = nil
+  output = capture_output { settings = load_settings }
+  assert_equal(defaults, settings, "load_settings returns every default when there is no settings file, ignoring the old path file", failures)
+  assert_equal(defaults, YAML.safe_load(File.read(settings_path)), "load_settings creates the settings file holding every default", failures)
+  assert_equal("", output, "load_settings says nothing when it creates the file", failures)
+
+  File.delete(legacy_path)
+  load_settings
+  assert_equal(false, File.exist?(legacy_path), "load_settings never creates the old path file", failures)
+
+  custom = {
+    "samples_folder" => "/somewhere/else",
+    "midi_mix_input_port" => "MIDI Mix:MIDI Mix MIDI 1 20:0",
+    "midi_mix_output_port" => "midi_mix_out",
+    "clock_mode" => "external",
+    "tempo" => 87.5,
+  }
+  File.write(settings_path, custom.to_yaml)
+  output = capture_output { settings = load_settings }
+  assert_equal(custom, settings, "load_settings reads each setting from the file", failures)
+  assert_equal("", output, "load_settings says nothing when every setting is good", failures)
+
+  File.write(settings_path, "tempo: 120\n")
+  output = capture_output { settings = load_settings }
+  assert_equal(defaults.merge("tempo" => 120), settings, "load_settings uses the default for a missing setting", failures)
+  assert_equal(true, output.include?("clock_mode is missing"), "load_settings names a missing setting", failures)
+
+  File.write(settings_path, custom.merge("clock_mode" => "sideways", "tempo" => "fast", "midi_mix_input_port" => 5).to_yaml)
+  output = capture_output { settings = load_settings }
   assert_equal(
-    File.join(config_home, "Applications", "SonicPi", "Samples"),
-    root,
-    "resolve_samples_root seeds the config file with the default path on first run",
+    custom.merge("clock_mode" => "internal", "tempo" => 160, "midi_mix_input_port" => "midi_mix"),
+    settings,
+    "load_settings uses the default for a setting with an unrecognised value",
     failures
   )
-  assert_equal(true, File.exist?(config_path), "resolve_samples_root creates the config file if missing", failures)
-
-  File.write(config_path, "  /somewhere/else  \n")
   assert_equal(
-    "/somewhere/else",
-    resolve_samples_root,
-    "resolve_samples_root reads and trims an existing config file instead of overwriting it",
+    [true, true, true],
+    ["clock_mode", "tempo", "midi_mix_input_port"].map { |name| output.include?("#{name} in #{settings_path} has an unrecognised value") },
+    "load_settings names each setting with an unrecognised value",
     failures
   )
+
+  File.write(settings_path, custom.merge("tempoo" => 90).reject { |name, _| name == "tempo" }.to_yaml)
+  output = capture_output { settings = load_settings }
+  assert_equal(160, settings["tempo"], "load_settings uses the default when a setting's name is misspelt", failures)
+  assert_equal(true, output.include?("tempoo in #{settings_path} is not a setting"), "load_settings names a misspelt setting", failures)
+
+  File.write(settings_path, "tempo: [1\n")
+  output = capture_output { settings = load_settings }
+  assert_equal(defaults, settings, "load_settings uses every default when the file is not valid YAML", failures)
+  assert_equal(true, output.include?("could not be read"), "load_settings says when the file could not be read", failures)
 end
 
 ##### midi_value_to_range #####

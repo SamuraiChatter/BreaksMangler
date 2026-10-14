@@ -1,4 +1,4 @@
-.breaksmangler_samples_root
+.breaksmangler.yml
 
 # Ignore every file placed under Samples/ (audio of any kind, or anything
 # dropped in by accident, e.g. an .mp3) so nobody's sample library ends up

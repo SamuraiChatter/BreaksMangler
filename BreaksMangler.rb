@@ -8,7 +8,58 @@
 
 ################SETUP##############
 
-use_bpm 160
+######### Settings (read from ~/.breaksmangler.yml on every run) #########
+# Every setting and its default is listed in README.md.
+require "yaml"
+
+define :load_settings do
+  path = File.join(Dir.home, ".breaksmangler.yml")
+  defaults = {
+    "samples_folder" => File.join(Dir.home, "Applications", "SonicPi", "Samples"),
+    "midi_mix_input_port" => "midi_mix",
+    "midi_mix_output_port" => "midi_mix",
+    "clock_mode" => "internal",
+    "tempo" => 160,
+  }
+  text = ->(value) { value.is_a?(String) && !value.strip.empty? }
+  valid = {
+    "samples_folder" => text,
+    "midi_mix_input_port" => text,
+    "midi_mix_output_port" => text,
+    "clock_mode" => ->(value) { ["internal", "external"].include?(value) },
+    "tempo" => ->(value) { value.is_a?(Numeric) && value > 0 },
+  }
+
+  File.write(path, defaults.to_yaml) unless File.exist?(path)
+  loaded = begin
+    YAML.safe_load(File.read(path))
+  rescue Psych::Exception => error
+    puts "BreaksMangler: #{path} could not be read (#{error.message}) - using every default"
+    nil
+  end
+  loaded = {} unless loaded.is_a?(Hash)
+
+  (loaded.keys - defaults.keys).each do |name|
+    puts "BreaksMangler: #{name} in #{path} is not a setting - ignoring it"
+  end
+
+  defaults.to_h do |name, default|
+    if !loaded.key?(name)
+      puts "BreaksMangler: #{name} is missing from #{path} - using the default, #{default}"
+      [name, default]
+    elsif valid[name].call(loaded[name])
+      [name, loaded[name]]
+    else
+      puts "BreaksMangler: #{name} in #{path} has an unrecognised value, #{loaded[name].inspect} - using the default, #{default}"
+      [name, default]
+    end
+  end
+end
+
+settings = load_settings
+
+# clock_mode is read but not acted on yet: the tempo always comes from here
+use_bpm settings["tempo"]
 use_sched_ahead_time 0.2
 
 ########## Akai Midimix Details ##########
@@ -27,13 +78,6 @@ midi_fx_level_notes.each_with_index {|note, idx| midi_note_lookup[note] = {midi_
 ######### Sample Library (dynamic folder scan) #########
 # Folder/filename conventions are documented in README.md. Full rationale
 # in DEVELOPER_README.md.
-
-define :resolve_samples_root do
-  config_path = File.join(Dir.home, ".breaksmangler_samples_root")
-  default_root = File.join(Dir.home, "Applications", "SonicPi", "Samples")
-  File.write(config_path, default_root) unless File.exist?(config_path)
-  File.read(config_path).strip
-end
 
 define :build_loops do |samples_root, demo_loops|
   folder_pattern = /\A(\d+)_(beat|bar)\z/
@@ -81,7 +125,7 @@ demo_loops = [
   { sample: :loop_garzul, beats: 16 },
 ]
 
-loops = build_loops(resolve_samples_root, demo_loops)
+loops = build_loops(settings["samples_folder"], demo_loops)
 
 ######### Loop and Effect Details #########
 effects = [
@@ -94,7 +138,7 @@ effects = [
 # Defined on every run, so a change here takes effect without restarting Sonic Pi
 define :send_led_status do |note, status|
   velocity = status == 'off' ? 0 : 127
-  midi_note_on note, velocity: velocity, port: 'midi_mix', channel: 1
+  midi_note_on note, velocity: velocity, port: settings["midi_mix_output_port"], channel: 1
 end
 
 ######### Set Variables and reset LEDs on Initial Run ########
@@ -141,7 +185,7 @@ end
 
 live_loop :update_midi_button_events do
   use_real_time
-  sequence_note, sequence_velocity = sync "/midi:midi_mix:1/note_on"
+  sequence_note, sequence_velocity = sync "/midi:#{settings["midi_mix_input_port"]}:1/note_on"
   if get(:midi_sequence_trigger_notes).index(sequence_note)
     update_sequence(sequence_note, :midi_sequence_trigger_notes, :midi_triggers)
     handle_led_status(sequence_note, :midi_sequence_trigger_notes, :sequence_trigger_leds)
@@ -156,7 +200,7 @@ end
 
 live_loop :update_midi_knob_slider_values do
   use_real_time
-  control_note, control_velocity = sync "/midi:midi_mix:1/control_change"
+  control_note, control_velocity = sync "/midi:#{settings["midi_mix_input_port"]}:1/control_change"
   lookup = midi_note_lookup[control_note]
   if lookup # This may need to stay since I won't be using all the various banks on midi controller
     index = lookup[:index]
