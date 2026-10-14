@@ -80,7 +80,41 @@ By default, BreaksMangler looks for this folder at
 `Applications/SonicPi/Samples` inside your home folder. If it can't find any
 samples there, it plays a small set of built-in demo loops instead so you
 can try it out right away — you'll see a message telling you it's doing
-this. If you'd rather keep your samples somewhere else, edit the file
-`.breaksmangler_samples_root` in your home folder (BreaksMangler creates
-this automatically the first time it runs) and put the full path to your
-samples folder in it.
+this. If you'd rather keep your samples somewhere else, change
+`samples_folder` in the settings file, described next.
+
+## Settings
+
+BreaksMangler reads its settings from `breaksmangler.yml`, in the same
+folder as `BreaksMangler.rb`, every time it runs. The first run creates the
+file with every setting at its default, so you only edit what you want to
+change:
+
+```yaml
+samples_folder: C:/Users/you/Applications/SonicPi/Samples
+midi_mix_input_port: midi_mix
+midi_mix_output_port: midi_mix
+clock_mode: internal
+tempo: 160
+```
+
+| Setting | Default | What it is |
+| --- | --- | --- |
+| `samples_folder` | `Applications/SonicPi/Samples` inside your home folder | The full path of the folder holding your length folders. Use forward slashes, on Windows too. |
+| `midi_mix_input_port` | `midi_mix` | The name Sonic Pi gives the Midi Mix's buttons, knobs and sliders. |
+| `midi_mix_output_port` | `midi_mix` | The name Sonic Pi gives the Midi Mix's LEDs. |
+| `clock_mode` | `internal` | `internal` or `external`. Only `internal` does anything so far: BreaksMangler keeps its own time either way. |
+| `tempo` | `160` | Beats per minute, any number above zero. |
+
+On Windows, Sonic Pi v5 calls the Midi Mix `midi_mix` for both input and
+output, which is the default. To see the names on your machine, look under
+Prefs → IO.
+
+If a setting is missing, misspelt or has a value BreaksMangler does not
+recognise, it plays with that setting's default and the log names the
+setting. Stop and run the script again after changing the file.
+
+The file is yours: git ignores it, so your settings are never committed and
+updating BreaksMangler never overwrites them. It is only found when the
+script is started with `run_file`. Code pasted into a buffer plays with
+every default and the log says so.
