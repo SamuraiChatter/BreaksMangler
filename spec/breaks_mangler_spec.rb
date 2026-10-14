@@ -84,6 +84,8 @@ Dir.mktmpdir("breaksmangler_spec_samples") do |root|
   File.write(File.join(root, "1_beat", "no_prefix.wav"), "") # sorts after all valid-prefix files
   File.write(File.join(root, "4_bar", "01_long.flac"), "")
   File.write(File.join(root, "not_a_match", "01_nope.wav"), "") # folder doesn't match N_beat/N_bar
+  FileUtils.mkdir_p(File.join(root, "0_beat"))
+  File.write(File.join(root, "0_beat", "01_zero.wav"), "") # zero beats can't be sliced, so it's skipped
 
   result = build_loops(root, demo_loops)
   names = result.map { |entry| File.basename(entry[:sample]) }
@@ -96,6 +98,12 @@ Dir.mktmpdir("breaksmangler_spec_samples") do |root|
     failures
   )
   assert_equal([1, 16, 1, 1, 1], beats, "build_loops tags each entry with its folder's beat count", failures)
+
+  bracket_root = File.join(root, "my [new] samples")
+  FileUtils.mkdir_p(File.join(bracket_root, "1_beat"))
+  File.write(File.join(bracket_root, "1_beat", "01_found.wav"), "")
+  names = build_loops(bracket_root, demo_loops).map { |entry| File.basename(entry[:sample]) }
+  assert_equal(["01_found.wav"], names, "build_loops finds samples under a path holding glob characters", failures)
 end
 
 ##### load_settings #####
@@ -173,6 +181,12 @@ Dir.mktmpdir("breaksmangler_spec_settings") do |settings_home|
   output = capture_output { settings = load_settings }
   assert_equal(defaults, settings, "load_settings uses every default when the file is not valid YAML", failures)
   assert_equal(true, output.include?("could not be read"), "load_settings says when the file could not be read", failures)
+
+  File.delete(settings_path)
+  FileUtils.mkdir_p(settings_path) # a settings path that can't be read as a file
+  output = capture_output { settings = load_settings }
+  assert_equal(defaults, settings, "load_settings uses every default when the file can't be opened", failures)
+  assert_equal(true, output.include?("could not be read"), "load_settings says when the file can't be opened", failures)
 end
 
 ##### midi_value_to_range #####

@@ -30,10 +30,10 @@ define :load_settings do
     "tempo" => ->(value) { value.is_a?(Numeric) && value > 0 },
   }
 
-  File.write(path, defaults.to_yaml) unless File.exist?(path)
   loaded = begin
+    File.write(path, defaults.to_yaml) unless File.exist?(path)
     YAML.safe_load(File.read(path))
-  rescue Psych::Exception => error
+  rescue SystemCallError, Psych::Exception => error
     puts "BreaksMangler: #{path} could not be read (#{error.message}) - using every default"
     nil
   end
@@ -85,13 +85,17 @@ define :build_loops do |samples_root, demo_loops|
   accepted_extensions = ["wav", "wave", "aiff", "aif", "flac"]
 
   entries = []
-  Dir.glob(File.join(samples_root, "*")).each do |folder_path|
+  # base: keeps glob characters in the samples path from being read as a pattern
+  Dir.glob("*", base: samples_root).each do |folder_name|
+    folder_path = File.join(samples_root, folder_name)
     next unless File.directory?(folder_path)
-    match = folder_pattern.match(File.basename(folder_path))
+    match = folder_pattern.match(folder_name)
     next unless match
     beats = match[2] == "bar" ? match[1].to_i * 4 : match[1].to_i
+    next if beats < 1 # a zero-beat loop cannot be sliced
 
-    Dir.glob(File.join(folder_path, "*")).each do |file_path|
+    Dir.glob("*", base: folder_path).each do |file_name|
+      file_path = File.join(folder_path, file_name)
       next unless File.file?(file_path)
       next unless accepted_extensions.include?(File.extname(file_path).delete(".").downcase)
 
