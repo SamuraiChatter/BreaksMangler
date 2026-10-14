@@ -1,0 +1,9 @@
+.breaksmangler_samples_root
+
+# Ignore every file placed under Samples/ (audio of any kind, or anything
+# dropped in by accident, e.g. an .mp3) so nobody's sample library ends up
+# committed to git. Directories and .gitkeep placeholders stay tracked so
+# the expected folder structure survives a fresh clone.
+Samples/**
+!Samples/**/
+!Samples/**/.gitkeep
