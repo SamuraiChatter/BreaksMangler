@@ -6,7 +6,19 @@
 # so the results can be read from the file rather than from Sonic Pi's panes.
 # Results from each machine are written up in docs/sonic-pi-v5-midi.md.
 
+# The Midi Mix's LED port comes from breaksmangler.yml beside this file when there is one,
+# since the Raspberry Pi names it differently from Windows; otherwise it is "midi_mix".
+require "yaml"
 midi_mix_port = "midi_mix"
+settings_path = File.file?(__FILE__) ? File.join(File.dirname(File.expand_path(__FILE__)), "breaksmangler.yml") : nil
+if settings_path && File.exist?(settings_path)
+  begin
+    configured = YAML.safe_load(File.read(settings_path))["midi_mix_output_port"]
+    midi_mix_port = configured if configured.is_a?(String) && !configured.empty?
+  rescue StandardError
+    # an unreadable settings file leaves the default
+  end
+end
 sequence_trigger_notes = [1,4,7,10,13,16,19,22]
 note_off_notes = [3,6,9,12,15,18,21,24]
 all_notes = sequence_trigger_notes + note_off_notes
