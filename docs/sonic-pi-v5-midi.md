@@ -64,6 +64,85 @@ The driver is saved as `audio-driver` in `~/.sonic-pi/config/v5-gui-settings.ini
 - **Buffers are not saved to disk.** The files under `~/.sonic-pi/store` were last written in December 2024, and the log shows `Permission denied` on `store/system/cache.json` at every start. Whether the two are connected has not been checked.
 - **Time State is shared across buffers.** Old code in another buffer that set `:midi_samples` broke BreaksMangler until Sonic Pi was restarted. This is not known to be new in v5.
 
+## Raspberry Pi 4
+
+Sonic Pi v5.0 (Ruby 3.4.4, SuperSonic v0.71.0) on a Raspberry Pi 4 running 64-bit Raspberry Pi OS (Debian 13 "trixie", `aarch64`, labwc on Wayland), 2 to 3 November 2026.
+
+### Installing Sonic Pi v5
+
+1. Download `Sonic-Pi-for-Linux-arm64-v5.0.0.AppImage` and put it in `~/Applications`.
+2. `chmod +x ~/Applications/Sonic-Pi-for-Linux-arm64-v5.0.0.AppImage`, then run it from a terminal on the desktop or double-click it. Plug the Midi Mix in first.
+3. To start it when the desktop starts, add `~/.config/autostart/sonic-pi.desktop` with `Type=Application`, `Name=Sonic Pi` and `Exec=` the full path of the AppImage. This was written but a reboot has not been tried; starting at boot is BREAK-8.
+4. For running without the GUI (see below), unpack the AppImage once: `./Sonic-Pi-for-Linux-arm64-v5.0.0.AppImage --appimage-extract`, then move the `squashfs-root` folder to `~/Applications/sonic-pi`. It is about 765 MB.
+
+### Port names
+
+| Device | Input | Output |
+|---|---|---|
+| Akai Midi Mix | `midi_mix_midi_mix_midi_1_28_0` | `midi_mix_midi_mix_midi_1_28_0` |
+
+The name is built from ALSA's device name, `midi_mix_midi_mix_midi_1`, plus ALSA's client number and port (`28_0`). Through-port: `midi_through_midi_through_port-0_14_0`. The client number comes from the order devices were plugged in, so it may change; whether it does across a replug or reboot has not been checked.
+
+The Pi needs this name in `breaksmangler.yml` as both `midi_mix_input_port` and `midi_mix_output_port`. With the defaults the script listens on `/midi:midi_mix:1/note_on`, which never arrives.
+
+### Cue paths
+
+| Event | Cue path | Values |
+|---|---|---|
+| Midi Mix button press | `/midi:midi_mix_midi_mix_midi_1_28_0:1/note_on` | note, 127 |
+| Midi Mix button release | `/midi:midi_mix_midi_mix_midi_1_28_0:1/note_off` | note, 127 |
+| Midi Mix knob or slider | `/midi:midi_mix_midi_mix_midi_1_28_0:1/control_change` | controller, value |
+
+Captured by the probe. Same shapes as Windows; only the port in the path differs. Controllers 18 and 19 were seen.
+
+### Audio
+
+Sonic Pi v5 on Linux uses PipeWire. The audio goes out of the Pi's 3.5 mm headphone jack (`bcm2835 Headphones`), through the PipeWire sink `Built-in Audio Stereo`.
+
+- **GUI:** opens `System Default` (2 outputs) and `sample :loop_amen` is heard. No `audioDeviceStopped` after the start-up device scan, unlike Windows Audio.
+- **No GUI:** started with no saved preferences, the engine opens `Patchbay (16 ch)`, a PipeWire patch point that goes nowhere, and nothing is heard. `sound_card_name = "System Default"` in `~/.sonic-pi/config/v5-audio-settings.toml` fixes it. The file is all comments until edited; the GUI reads it too.
+- **Level:** quiet at the sink's default 40%. Measured by recording the sink: a peak of 5809 of 32767 for `sample :loop_amen` at default amp, and 11619 at `amp: 2`. The sink was raised to 70% with `wpctl set-volume @DEFAULT_AUDIO_SINK@ 0.7`.
+
+### Running scripts over SSH, with no GUI
+
+`repl.rb`, which comes with Sonic Pi, stalled at start-up with the engine already running, and printed nothing, so it was not used. `headless-run.rb` mutes the mixer. A short script built on the same `headless_boot.rb` works and is audible:
+
+```ruby
+require_relative File.expand_path("~/Applications/sonic-pi/usr/share/sonic-pi/app/server/ruby/bin/headless_boot")
+script, duration = File.expand_path(ARGV[0]), (ARGV[1] || "20").to_f
+boot = SonicPi::HeadlessBoot.new
+boot.boot! { |osc| }
+boot.eval_client.send("/mixer-output-volume", boot.token, 1.0, 0)
+boot.say "READY - running #{script} for #{duration}s"
+boot.run("run_file #{script.inspect}")   # run_file, so the settings file is found
+sleep duration
+boot.stop_all
+sleep 0.5
+```
+
+Run it with `XDG_RUNTIME_DIR=/run/user/1000 ~/Applications/sonic-pi/usr/ruby/bin/ruby sp-run.rb <script> <seconds>`. Close the GUI first: both start an engine. Do not run two at once.
+
+### Checked so far
+
+- `sample :loop_amen` is heard.
+- `midi_probe.rb`: the LED sweep lights, then clears; the cue lines above were logged.
+- BreaksMangler started with `run_file`: the first run created `breaksmangler.yml` beside the script. Played for 90 seconds with the Midi Mix, it sounded and responded as expected to buttons, knobs and sliders (judged by ear and by hand), and the log showed no errors and no audio stops. The LED walk and the top-row start have not yet been ticked off one by one.
+- With no samples, the demo loops play and the log names the folder it searched.
+
+### Not yet checked
+
+- A full two minutes without the LEDs pausing, and the BREAK-1 button, knob and Send All checks one by one.
+- The sample knob sweeping real length folders in filename-number order.
+- Whether a replugged Midi Mix is switched on, and whether the port name changes after a replug or reboot.
+- Whether `"midi_mix"` alone lights the LEDs on the output side (the short name is not a match for the input path).
+
+### Differences from Windows
+
+- The port name is long, and carries ALSA's client number.
+- No audio driver choice and no Exclusive Mode: PipeWire, with the engine's own `System Default`.
+- With no GUI, the engine picks a silent device unless `sound_card_name` is set.
+- The default samples folder, `~/Applications/SonicPi/Samples`, does not exist on this Pi: the samples folders are at `~/SonicPi/Samples`, and are empty.
+
 ## Repeating the checks on another machine
 
 Nothing has to be copied out of Sonic Pi's panes. The answers end up in two files under `~/.sonic-pi/log`:

@@ -107,7 +107,10 @@ tempo: 160
 | `tempo` | `160` | Beats per minute, any number above zero. |
 
 On Windows, Sonic Pi v5 calls the Midi Mix `midi_mix` for both input and
-output, which is the default. To see the names on your machine, look under
+output, which is the default. On a Raspberry Pi 4 it calls it
+`midi_mix_midi_mix_midi_1_28_0` for both, so put that in the settings file.
+The `28` is ALSA's number for the device, so check it under Prefs → IO if
+buttons stop responding. To see the names on your machine, look under
 Prefs → IO.
 
 If a setting is missing, misspelt or has a value BreaksMangler does not
