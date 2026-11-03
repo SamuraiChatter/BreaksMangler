@@ -81,9 +81,9 @@ Sonic Pi v5.0 (Ruby 3.4.4, SuperSonic v0.71.0) on a Raspberry Pi 4 running 64-bi
 |---|---|---|
 | Akai Midi Mix | `midi_mix_midi_mix_midi_1_28_0` | `midi_mix_midi_mix_midi_1_28_0` |
 
-The name is built from ALSA's device name, `midi_mix_midi_mix_midi_1`, plus ALSA's client number and port (`28_0`). Through-port: `midi_through_midi_through_port-0_14_0`. The client number comes from the order devices were plugged in, so it may change; whether it does across a replug or reboot has not been checked.
+The name is built from ALSA's device name, `midi_mix_midi_mix_midi_1`, plus ALSA's client number and port (`28_0`). Through-port: `midi_through_midi_through_port-0_14_0`. The client number comes from the order devices were plugged in. It stayed `28_0` after the Midi Mix was unplugged and plugged back in; a reboot has not been tried.
 
-The Pi needs this name in `breaksmangler.yml` as both `midi_mix_input_port` and `midi_mix_output_port`. With the defaults the script listens on `/midi:midi_mix:1/note_on`, which never arrives.
+The Pi needs this name in `breaksmangler.yml` as both `midi_mix_input_port` and `midi_mix_output_port`. The short name `midi_mix` does not light the LEDs on the Pi: the probe's sweep, sent to `midi_mix` after a replug, showed nothing, and the same sweep to the full name lit them. `midi_probe.rb` therefore takes the LED port from `midi_mix_output_port` in a `breaksmangler.yml` beside it, and uses `midi_mix` when there is none. With the defaults the script listens on `/midi:midi_mix:1/note_on`, which never arrives.
 
 ### Cue paths
 
@@ -94,6 +94,10 @@ The Pi needs this name in `breaksmangler.yml` as both `midi_mix_input_port` and 
 | Midi Mix knob or slider | `/midi:midi_mix_midi_mix_midi_1_28_0:1/control_change` | controller, value |
 
 Captured by the probe. Same shapes as Windows; only the port in the path differs. Controllers 18 and 19 were seen.
+
+### Replugging the Midi Mix
+
+Unplugged and plugged back in while the probe was running (7 seconds apart): the engine's port list dropped to the loopback port alone, then both `midi_mix_midi_mix_midi_1_28_0` ports returned under the same name. The probe heard button presses and knob turns again from the next press, with no restart and nothing changed in Prefs. The output also works after a replug: `pi_check.rb`, which sweeps the full port name, lit the LEDs and played sound. The input therefore comes back by itself on the Pi, unlike Windows.
 
 ### Audio
 
@@ -128,12 +132,12 @@ It copies the script to `~/SonicPi/Scripts`, stops any Sonic Pi already running 
 
 - The BREAK-1 button, knob and Send All checks one by one.
 - That the sample knob visits the tracks in filename-number order: the sweep was judged by ear, and two of the seven tracks were not reached.
-- Whether a replugged Midi Mix is switched on, and whether the port name changes after a replug or reboot.
-- Whether `"midi_mix"` alone lights the LEDs on the output side (the short name is not a match for the input path).
+- Whether the port name changes after a reboot.
 
 ### Differences from Windows
 
 - The port name is long, and carries ALSA's client number.
+- A replugged Midi Mix works again by itself, input and output; on Windows only the output came back.
 - No audio driver choice and no Exclusive Mode: PipeWire, with the engine's own `System Default`.
 - With no GUI, the engine picks a silent device unless `sound_card_name` is set.
 - The default samples folder, `~/Applications/SonicPi/Samples`, does not exist on this Pi: the samples folders are at `~/SonicPi/Samples`, and are empty.
