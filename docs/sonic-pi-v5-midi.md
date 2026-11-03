@@ -105,22 +105,15 @@ Sonic Pi v5 on Linux uses PipeWire. The audio goes out of the Pi's 3.5 mm headph
 
 ### Running scripts over SSH, with no GUI
 
-`repl.rb`, which comes with Sonic Pi, stalled at start-up with the engine already running, and printed nothing, so it was not used. `headless-run.rb` mutes the mixer. A short script built on the same `headless_boot.rb` works and is audible:
+`repl.rb`, which comes with Sonic Pi, stalled at start-up with the engine already running, and printed nothing, so it was not used. `headless-run.rb` mutes the mixer. `tools/pi/sp-run.rb` is a short script built on the same `headless_boot.rb` that is audible and starts `run_file`, so the settings file is found.
 
-```ruby
-require_relative File.expand_path("~/Applications/sonic-pi/usr/share/sonic-pi/app/server/ruby/bin/headless_boot")
-script, duration = File.expand_path(ARGV[0]), (ARGV[1] || "20").to_f
-boot = SonicPi::HeadlessBoot.new
-boot.boot! { |osc| }
-boot.eval_client.send("/mixer-output-volume", boot.token, 1.0, 0)
-boot.say "READY - running #{script} for #{duration}s"
-boot.run("run_file #{script.inspect}")   # run_file, so the settings file is found
-sleep duration
-boot.stop_all
-sleep 0.5
+From the PC, with `ssh pi` set up:
+
+```
+bash tools/pi/pi-run.sh <script.rb> [seconds] [--record]
 ```
 
-Run it with `XDG_RUNTIME_DIR=/run/user/1000 ~/Applications/sonic-pi/usr/ruby/bin/ruby sp-run.rb <script> <seconds>`. Close the GUI first: both start an engine. Do not run two at once.
+It copies the script to `~/SonicPi/Scripts`, stops any Sonic Pi already running (both start an engine, and two fight over the audio device and MIDI ports), runs it, and prints the log and the engine's audio lines. `--record` also measures the level reaching the headphone sink. `tools/pi/pi_check.rb` plays a loop and sweeps the LEDs together, to tell a silent run from a dead one. The `test-on-pi` skill describes how to read the result.
 
 ### Checked so far
 
