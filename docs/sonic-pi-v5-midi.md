@@ -119,13 +119,15 @@ It copies the script to `~/SonicPi/Scripts`, stops any Sonic Pi already running 
 
 - `sample :loop_amen` is heard.
 - `midi_probe.rb`: the LED sweep lights, then clears; the cue lines above were logged.
-- BreaksMangler started with `run_file`: the first run created `breaksmangler.yml` beside the script. Played for 90 seconds with the Midi Mix, it sounded and responded as expected to buttons, knobs and sliders (judged by ear and by hand), and the log showed no errors and no audio stops. The LED walk and the top-row start have not yet been ticked off one by one.
+- BreaksMangler started with `run_file`: the first run created `breaksmangler.yml` beside the script. It sounded and responded as expected to buttons, knobs and sliders, judged by ear and by hand.
+- Steadiness over two minutes: a 135-second run logged 361 beat steps, each 0.36 to 0.39 seconds apart at 160 BPM (0.375 seconds), none over 0.5 seconds, with no audio-device stop and no errors. A 90-second run was the same (longest gap 0.44 seconds). The Midi Mix LEDs are sent on those steps.
 - With no samples, the demo loops play and the log names the folder it searched.
+- With seven tracks in `1_bar` (2), `2_bar` (1) and `4_bar` (4) under `samples_folder`, sweeping the sample knob for 90 seconds loaded five of them, with no errors, and sounded right by ear.
 
 ### Not yet checked
 
-- A full two minutes without the LEDs pausing, and the BREAK-1 button, knob and Send All checks one by one.
-- The sample knob sweeping real length folders in filename-number order.
+- The BREAK-1 button, knob and Send All checks one by one.
+- That the sample knob visits the tracks in filename-number order: the sweep was judged by ear, and two of the seven tracks were not reached.
 - Whether a replugged Midi Mix is switched on, and whether the port name changes after a replug or reboot.
 - Whether `"midi_mix"` alone lights the LEDs on the output side (the short name is not a match for the input path).
 
