@@ -19,14 +19,16 @@ define :load_settings do |path|
     "midi_mix_output_port" => "midi_mix",
     "clock_mode" => "internal",
     "tempo" => 160,
+    "clock_trim_ms" => 0,
   }
-  text = ->(value) { value.is_a?(String) && !value.strip.empty? }
+  text =->(value) { value.is_a?(String) && !value.strip.empty? }
   valid = {
     "samples_folder" => text,
     "midi_mix_input_port" => text,
     "midi_mix_output_port" => text,
     "clock_mode" => ->(value) { ["internal", "external"].include?(value) },
     "tempo" => ->(value) { value.is_a?(Numeric) && value > 0 },
+    "clock_trim_ms" => ->(value) { value.is_a?(Integer) },
   }
 
   if path.nil?
@@ -47,7 +49,7 @@ define :load_settings do |path|
     puts "BreaksMangler: #{name} in #{path} is not a setting - ignoring it"
   end
 
-  defaults.to_h do |name, default|
+  settings = defaults.to_h do |name, default|
     if !loaded.key?(name)
       puts "BreaksMangler: #{name} is missing from #{path} - using the default, #{default}"
       [name, default]
@@ -58,6 +60,15 @@ define :load_settings do |path|
       [name, default]
     end
   end
+
+  # Playing earlier than this would need more than Sonic Pi's 0.2 s schedule-ahead.
+  # Not Integer#clamp: Sonic Pi replaces it with a one-argument version.
+  trim = settings["clock_trim_ms"]
+  settings["clock_trim_ms"] = [[trim, -150].max, 150].min
+  if settings["clock_trim_ms"] != trim
+    puts "BreaksMangler: clock_trim_ms in #{path} is #{trim}, outside -150 to 150 - using #{settings["clock_trim_ms"]}"
+  end
+  settings
 end
 
 # run_file gives the script its own path, which is how the settings file
@@ -65,9 +76,14 @@ end
 settings_path = File.file?(__FILE__) ? File.join(File.dirname(File.expand_path(__FILE__)), "breaksmangler.yml") : nil
 settings = load_settings(settings_path)
 
-# clock_mode is read but not acted on yet: the tempo always comes from here
+# In external mode the MPC sets the tempo and starts and stops the pattern (see "Follow the MPC" below)
+external_clock = settings["clock_mode"] == "external"
 use_bpm settings["tempo"]
 use_sched_ahead_time 0.2
+
+# External mode only: false lets a sounding slice ring out when the MPC stops, true cuts it off
+cut_samples_on_stop = false
+recent_slices = [] # the last few slices started, for cutting them off
 
 ########## Akai Midimix Details ##########
 pattern_length = 8.0 # 8 Steps on Akai Midimix Contoller
@@ -175,13 +191,77 @@ if get(:initial_run) == nil
   end
 end
 
+######### Follow the MPC (external mode) #########
+# Start, Continue and Stop arrive as cues from whichever port the MPC is on. The clock itself
+# is not a cue: Sonic Pi follows it, and midi_clock_sources reports its tempo.
+define :mpc_bpm do
+  source = midi_clock_sources.find { |s| s[:primary] }
+  source ? source[:bpm] : settings["tempo"]
+end
+
+define :mpc_stop do |reason|
+  if get(:mpc_playing)
+    set :mpc_playing, false
+    puts "BreaksMangler: #{reason} - stopping"
+    recent_slices.each { |node| kill node } if cut_samples_on_stop
+    # Step LEDs go out 0.2 s ahead plus the trim, so wait for any still on their way,
+    # then hand the bottom row back to the note-off buttons
+    sleep rt(0.4)
+    get(:midi_note_off_notes).each_with_index do |note, index|
+      send_led_status(note, get(:midi_note_offs)[index] == 1 ? 'on' : 'off')
+    end
+  end
+end
+
+if external_clock
+  set :mpc_playing, false
+
+  live_loop :mpc_transport do
+    use_real_time
+    event = sync_event "/midi:*/*"
+    case event.path.split("/").last
+    when "start", "continue"
+      # Play Start joins at the next two-bar boundary, so step 1 falls on one of the MPC's odd bars;
+      # Play (Continue) resumes mid-song, so it joins at the next bar
+      set :mpc_join_beats, event.path.end_with?("/start") ? 8 : 4
+      set :mpc_restart, true
+      set :mpc_play_time, Time.now.to_f
+      set :mpc_playing, true
+      cue :mpc_play
+    when "stop"
+      mpc_stop "the MPC stopped"
+    end
+  end
+
+  # A pulled cable sends no Stop; Sonic Pi marks the clock stale two to three seconds after it goes
+  live_loop :mpc_clock_watch do
+    use_real_time
+    source = midi_clock_sources.find { |s| s[:primary] }
+    recently_started = Time.now.to_f - get(:mpc_play_time).to_f < 1
+    mpc_stop "the MPC's clock stopped" if source && source[:stale] && !recently_started
+    sleep 0.5
+  end
+end
+
 ######### Establish Sync Pulse and Step Counter #########
 live_loop :pulse do
+  if external_clock
+    sync :mpc_play unless get(:mpc_playing)
+    if get(:mpc_restart)
+      set :mpc_restart, false
+      tick_reset
+      midi_sync get(:mpc_join_beats) # also switches this loop's sleep to the MPC's tempo
+    end
+    next unless get(:mpc_playing) # stopped while waiting for the bar
+  end
   # The step travels with the cue, so every loop that syncs on it gets the same step
   step = (tick % pattern_length).to_i
   puts "PULSE #{step}"
-  cue :step, step: step
-  midi_clock_beat port: "s-1_2"
+  if external_clock
+    time_warp(rt(settings["clock_trim_ms"] / 1000.0)) { cue :step, step: step }
+  else
+    cue :step, step: step
+  end
   sleep 1
 end
 
@@ -225,6 +305,7 @@ end
 ######### Play Music #########
 live_loop :e do
   step = sync(:step)[:step]
+  use_bpm mpc_bpm if external_clock # so beat_stretch fits each slice to the MPC's current tempo
   midi_triggers = get(:midi_triggers)
   trigger = midi_triggers[step]
   midi_note_offs = get(:midi_note_offs)
@@ -275,29 +356,37 @@ define :determine_behavior do |step, midi_triggers|
   [step, previous_steps]
 end
 
+# Plays a slice and remembers it, so mpc_stop can cut it off
+define :slice_sample do |name, opts|
+  node = sample name, opts
+  recent_slices << node
+  recent_slices.shift while recent_slices.size > 4
+  node
+end
+
 define :play_sample do |loop, slice, step|
   hash = effects[midi_value_to_range(get(:midi_fx)[step], effects.size - 1)]
   fx = hash[:effect]
   level = get(:midi_fx_level)[step] / 128.0 #128 instead of 127 beacause a lot of values need to be less than 1.0
   if fx == :rate
     if (0.0..0.1).include?(level)
-      sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats], slice: slice
+      slice_sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats], slice: slice
     elsif (0.1..0.3).include?(level)
-      sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats], slice: slice, rate: -1
+      slice_sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats], slice: slice, rate: -1
     elsif (0.3..0.5).include?(level)
-      sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats] * 1.5, slice: slice, rate: 0.5
+      slice_sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats] * 1.5, slice: slice, rate: 0.5
     elsif (0.5..0.7).include?(level)
-      sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats] * 1.25, slice: slice, rate: 0.75
+      slice_sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats] * 1.25, slice: slice, rate: 0.75
     elsif (0.7..0.9).include?(level)
-      sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats] / 1.5, slice: slice, rate: 1.25
+      slice_sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats] / 1.5, slice: slice, rate: 1.25
     else
-      sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats] / 2, slice: slice, rate: 1.5
+      slice_sample loop[:sample], beat_stretch: loop[:beats], num_slices: loop[:beats] / 2, slice: slice, rate: 1.5
     end
   else
     level_attribute = hash[:level_control]
     opts = hash[:opts]
     with_fx fx, level_attribute, level, opts.dig(0,0), opts.dig(0,1), opts.dig(1,0), opts.dig(1,1) do
-      sample loop[:sample],
+      slice_sample loop[:sample],
         beat_stretch: loop[:beats],
         num_slices: loop[:beats],
         slice: slice

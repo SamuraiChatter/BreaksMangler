@@ -138,6 +138,7 @@ Dir.mktmpdir("breaksmangler_spec_settings") do |settings_home|
     "midi_mix_output_port" => "midi_mix",
     "clock_mode" => "internal",
     "tempo" => 160,
+    "clock_trim_ms" => 0,
   }
 
   File.write(legacy_path, "/old/path/file")
@@ -161,6 +162,7 @@ Dir.mktmpdir("breaksmangler_spec_settings") do |settings_home|
     "midi_mix_output_port" => "midi_mix_out",
     "clock_mode" => "external",
     "tempo" => 87.5,
+    "clock_trim_ms" => -20,
   }
   File.write(settings_path, custom.to_yaml)
   output = capture_output { settings = load_settings(settings_path) }
@@ -172,20 +174,27 @@ Dir.mktmpdir("breaksmangler_spec_settings") do |settings_home|
   assert_equal(defaults.merge("tempo" => 120), settings, "load_settings uses the default for a missing setting", failures)
   assert_equal(true, output.include?("clock_mode is missing"), "load_settings names a missing setting", failures)
 
-  File.write(settings_path, custom.merge("clock_mode" => "sideways", "tempo" => "fast", "midi_mix_input_port" => 5).to_yaml)
+  File.write(settings_path, custom.merge("clock_mode" => "sideways", "tempo" => "fast", "midi_mix_input_port" => 5, "clock_trim_ms" => 2.5).to_yaml)
   output = capture_output { settings = load_settings(settings_path) }
   assert_equal(
-    custom.merge("clock_mode" => "internal", "tempo" => 160, "midi_mix_input_port" => "midi_mix"),
+    custom.merge("clock_mode" => "internal", "tempo" => 160, "midi_mix_input_port" => "midi_mix", "clock_trim_ms" => 0),
     settings,
     "load_settings uses the default for a setting with an unrecognised value",
     failures
   )
   assert_equal(
-    [true, true, true],
-    ["clock_mode", "tempo", "midi_mix_input_port"].map { |name| output.include?("#{name} in #{settings_path} has an unrecognised value") },
+    [true, true, true, true],
+    ["clock_mode", "tempo", "midi_mix_input_port", "clock_trim_ms"].map { |name| output.include?("#{name} in #{settings_path} has an unrecognised value") },
     "load_settings names each setting with an unrecognised value",
     failures
   )
+
+  [[400, 150], [-151, -150]].each do |trim, clamped|
+    File.write(settings_path, custom.merge("clock_trim_ms" => trim).to_yaml)
+    output = capture_output { settings = load_settings(settings_path) }
+    assert_equal(clamped, settings["clock_trim_ms"], "load_settings clamps clock_trim_ms #{trim} to #{clamped}", failures)
+    assert_equal(true, output.include?("clock_trim_ms in #{settings_path} is #{trim}, outside -150 to 150 - using #{clamped}"), "load_settings says when it clamps clock_trim_ms #{trim}", failures)
+  end
 
   File.write(settings_path, custom.merge("tempoo" => 90).reject { |name, _| name == "tempo" }.to_yaml)
   output = capture_output { settings = load_settings(settings_path) }
