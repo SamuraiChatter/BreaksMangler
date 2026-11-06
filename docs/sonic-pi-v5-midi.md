@@ -80,6 +80,7 @@ Sonic Pi v5.0 (Ruby 3.4.4, SuperSonic v0.71.0) on a Raspberry Pi 4 running 64-bi
 | Device | Input | Output |
 |---|---|---|
 | Akai Midi Mix | `midi_mix_midi_mix_midi_1_28_0` | `midi_mix_midi_mix_midi_1_28_0` |
+| CME U2MIDI Pro (carrying the MPC) | `u2midi_pro_u2midi_pro_midi_1_28_0` | `u2midi_pro_u2midi_pro_midi_1_28_0` |
 
 The name is built from ALSA's device name, `midi_mix_midi_mix_midi_1`, plus ALSA's client number and port (`28_0`). Through-port: `midi_through_midi_through_port-0_14_0`. The client number comes from the order devices were plugged in. It stayed `28_0` after the Midi Mix was unplugged and plugged back in; a reboot has not been tried.
 
@@ -94,6 +95,57 @@ The Pi needs this name in `breaksmangler.yml` as both `midi_mix_input_port` and 
 | Midi Mix knob or slider | `/midi:midi_mix_midi_mix_midi_1_28_0:1/control_change` | controller, value |
 
 Captured by the probe. Same shapes as Windows; only the port in the path differs. Controllers 18 and 19 were seen.
+
+### The MPC's clock and transport
+
+Checked on 5 November 2026 with a standalone MPC One, its Scarlett 4i4 still attached to it, playing a sequence at 120 BPM and then at other tempos.
+
+**Route: the MPC's 5-pin MIDI Out, through a CME U2MIDI Pro USB MIDI cable, into a USB-A port on the Pi.** This is the route BREAK-7 should assume. The MPC's own USB ports were not tried: the cable route worked first time and needs no change on either machine.
+
+Setup:
+
+1. Plug the U2MIDI Pro into the Pi, and its **IN** plug into the MPC's MIDI Out. The cable takes its power from the Pi's USB port, so nothing extra is needed to power it.
+2. On the MPC, in Menu → Preferences → Sync, switch MIDI Clock send on for the MIDI Out port. Nothing else was changed; the MPC sends MMC as well without being asked.
+3. Start Sonic Pi. The cable shows up as input and output `u2midi_pro_u2midi_pro_midi_1_28_0`. Like the Midi Mix's, the name carries ALSA's client number, so with both plugged in one of them will have a different number.
+
+What the MPC sends, captured with `aseqdump` and `midi_probe.rb`:
+
+| MPC button | Sonic Pi cues, in order | Clock |
+|---|---|---|
+| Play Start | `/start []`, `/song_position_pointer [0]`, then `/sysex` (MMC Locate and MMC Play) | starts with the cue |
+| Play (after a stop) | `/continue []`, `/song_position_pointer [n]` where n is the position in sixteenths (e.g. `[1766]`), then `/sysex` (MMC Locate and Play) | starts with the cue |
+| Stop | `/stop []`, then `/sysex` (MMC Stop) | stops: nothing arrives while stopped |
+
+Each path begins `/midi:u2midi_pro_u2midi_pro_midi_1_28_0`, with no channel. The clock itself never arrives as a cue: the probe, which logs every `/midi:*/*` path, saw no clock path at all. While stopped, the MPC also sent bursts of `song_position_pointer [0]` with MMC Locate before the first play; what triggers them was not pinned down.
+
+The clock is 24 ticks a beat. At 120 BPM the ticks were 20.83 ms apart on average, and 98% of them were 19 to 23 ms apart.
+
+`midi_clock_sources`:
+
+- Before any clock has arrived: empty.
+- While playing: `bpm=120 clocking=true stale=false primary=true`. It reads high for about a second after a start (125, 132) before settling.
+- After Stop: `clocking=false stale=true` within two to three seconds, keeping the last tempo.
+- A tempo change on the MPC shows within two seconds: 120, 133, 163, 169.5 as the tempo was turned up.
+
+### Following the MPC with Sonic Pi v5's own MIDI sync
+
+v5 can follow an incoming MIDI clock itself: `use_bpm :midi` makes `sleep` follow the clock's tempo, and `midi_sync` waits for the clock to start and then joins at the next bar (see their entries in Sonic Pi's help). A test loop that called `midi_sync 4` and then played a kick each bar and a tick each beat showed:
+
+- **`midi_sync` joins on Play Start only.** It wakes on `/start` cues, then checks that the engine's clock is anchored and running. Play after a stop sends Continue, which never wakes it, so the loop waited through three Plays.
+- It joined 1.2 seconds after Play Start, at the top of the next bar.
+- **The beats follow the MPC's tempo.** After a change to about 112 BPM the beats settled at 0.533 seconds apart (112.5 BPM). The first bar after a change was uneven (0.36 to 0.72 seconds) before it settled.
+- `current_bpm` stayed at the tempo it had when the loop joined (127.5), so it is no guide to the live tempo; `midi_clock_sources` is.
+- A large change is followed too: from 152 to 69 BPM the beats went from 0.39 to 0.87 seconds apart.
+- By ear, the ticks were in time with the MPC, perhaps a few milliseconds behind. The engine's audio buffer of 1024 samples alone is about 21 ms.
+- **Stop does not stop the loop.** After `/stop`, `sleep` carries on at the last tempo, so the loop played out its remaining beats (14 beats, about six seconds, after one Stop) before it went quiet waiting in the next `midi_sync`. Heard as well as logged.
+- **A Play Start during those beats** changed their tempo straight away, but the loop only lined up again at its next `midi_sync`, 4.4 seconds later, at a bar line. By ear it then caught up and stayed in time.
+
+For BREAK-7 this means:
+
+- Act on the `/stop` cue directly; the clock stopping does not stop anything.
+- Treat `/start` and `/continue` both as play (BREAK-7 restarts from step 1 on either); `midi_sync` alone misses Continue.
+- `midi_sync` joins at the *next* bar, so step 1 would land a bar after the MPC's. Starting on the `/start` cue with `use_bpm :midi` (or `midi_sync` with a quantum of 1) may avoid that; untested.
+- Read the live tempo from `midi_clock_sources`, not `current_bpm`.
 
 ### Replugging the Midi Mix
 
@@ -133,6 +185,8 @@ It copies the script to `~/SonicPi/Scripts`, stops any Sonic Pi already running 
 - The BREAK-1 button, knob and Send All checks one by one.
 - That the sample knob visits the tracks in filename-number order: the sweep was judged by ear, and two of the seven tracks were not reached.
 - Whether the port name changes after a reboot.
+- The Midi Mix and the U2MIDI Pro plugged in together: which client number each gets.
+- The MPC's own USB ports as a MIDI route, and the MPC into Windows.
 
 ### Differences from Windows
 
