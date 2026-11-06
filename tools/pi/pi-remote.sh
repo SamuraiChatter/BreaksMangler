@@ -13,9 +13,11 @@ if [ ! -x "$ruby_bin" ]; then
 fi
 
 # Two engines fight over the audio device and the MIDI ports, so stop any first.
-# This file's own command line contains neither pattern, so pkill -f is safe here.
+# This file's own command line contains none of these patterns, so pkill -f is safe here.
+# The GUI's engine outlives the GUI, so it is stopped by name as well.
 pkill -f 'Sonic-Pi-for-Linux' 2>/dev/null
 pkill -f 'ruby.*sp-run.rb' 2>/dev/null
+pkill -f 'sonic-pi-supersonic' 2>/dev/null
 sleep 2
 
 # Measure what reaches the headphone sink, halfway through the run.
